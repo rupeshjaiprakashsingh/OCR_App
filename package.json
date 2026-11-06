@@ -1,0 +1,13 @@
+{
+  "name": "ocr-book-scanner-app",
+  "version": "1.0.0",
+  "description": "24/7 Local Searchable PDF OCR & Smart Book/Author Auto-Renamer Tool",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "cli": "node src/cli.js"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  }
+}

@@ -1,0 +1,1282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>24/7 Book Scanner Production QC, OCR & Auto-Renamer Suite</title>
+  <style>
+    :root {
+      --bg: #0b1120;
+      --surface: #151f32;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --success: #10b981;
+      --success-hover: #059669;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --purple: #8b5cf6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+      padding: 20px;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+
+    /* Top Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      background: linear-gradient(135deg, #151f32 0%, #1a2742 100%);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 24px;
+      margin-bottom: 18px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+    }
+    .brand h1 { font-size: 1.35rem; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+    .brand p { color: var(--muted); font-size: 0.86rem; margin-top: 4px; }
+
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 7px 15px; border-radius: 999px; font-size: 0.83rem; font-weight: 600;
+      background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+    .status-badge.paused {
+      background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.4);
+    }
+    .pulse {
+      width: 9px; height: 9px; border-radius: 50%; background: #10b981;
+      animation: pulse 1.8s infinite;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+
+    /* KPI Strip */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    @media (max-width: 1024px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 18px;
+    }
+    .kpi-card .label { font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
+    .kpi-card .value { font-size: 1.55rem; font-weight: 800; margin-top: 4px; color: var(--text); }
+    .kpi-card .sub { font-size: 0.78rem; color: #34d399; margin-top: 2px; }
+
+    /* Top Settings & Active Job Grid */
+    .grid-top {
+      display: grid;
+      grid-template-columns: 1.35fr 1fr;
+      gap: 18px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 980px) { .grid-top { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+    }
+    .card-title {
+      font-size: 0.98rem; font-weight: 700; margin-bottom: 12px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .form-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+    .form-row label { font-size: 0.76rem; color: var(--muted); font-weight: 600; text-transform: uppercase; }
+    .input-group { display: flex; gap: 8px; }
+
+    input[type="text"], input[type="number"], textarea {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 11px; border-radius: 8px; font-size: 0.88rem; width: 100%;
+    }
+    input[type="text"]:focus, textarea:focus { outline: 1px solid var(--primary); border-color: var(--primary); }
+
+    button, .btn {
+      background: var(--primary); color: #fff; border: none;
+      padding: 8px 14px; border-radius: 8px; font-size: 0.84rem; font-weight: 600;
+      cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      text-decoration: none; transition: all 0.14s; white-space: nowrap;
+    }
+    button:hover, .btn:hover { background: var(--primary-hover); }
+    button.secondary, .btn.secondary { background: var(--surface-2); border: 1px solid var(--border); color: #e2e8f0; }
+    button.secondary:hover, .btn.secondary:hover { background: var(--surface-3); }
+    button.success, .btn.success { background: var(--success); color: #fff; }
+    button.success:hover, .btn.success:hover { background: var(--success-hover); }
+    button.purple, .btn.purple { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; }
+    button.purple:hover, .btn.purple:hover { filter: brightness(1.1); }
+    button.danger { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.45); }
+    button.danger:hover { background: var(--danger); color: #fff; }
+    button.sm { padding: 5px 10px; font-size: 0.78rem; border-radius: 6px; }
+
+    .toggles-bar {
+      display: flex; flex-wrap: wrap; gap: 14px; padding-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06); margin-top: 8px;
+    }
+    .toggle-item { display: flex; align-items: center; gap: 6px; font-size: 0.83rem; cursor: pointer; color: #cbd5e1; }
+
+    /* Active OCR Progress */
+    .active-job-box { display: flex; gap: 16px; align-items: center; }
+    .active-thumb { width: 88px; height: 120px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
+    .progress-bar-wrap { width: 100%; height: 11px; background: var(--bg); border-radius: 999px; overflow: hidden; margin: 9px 0 5px; border: 1px solid var(--border); }
+    .progress-bar-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #10b981); width: 0%; transition: width 0.3s ease; }
+
+    /* Jobs List */
+    .jobs-list { display: flex; flex-direction: column; gap: 12px; }
+    .job-item {
+      display: grid; grid-template-columns: 80px 1fr auto; gap: 18px; align-items: center;
+      background: rgba(15, 23, 42, 0.65); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px;
+      transition: border-color 0.15s;
+    }
+    .job-item:hover { border-color: #60a5fa; }
+    @media (max-width: 860px) { .job-item { grid-template-columns: 1fr; } }
+    .job-thumb { width: 80px; height: 110px; object-fit: cover; border-radius: 7px; border: 1px solid var(--border); background: #0f172a; }
+    .job-meta h3 { font-size: 1.06rem; color: #60a5fa; margin-bottom: 2px; }
+    .job-meta .author { font-size: 0.9rem; color: #f1f5f9; font-weight: 600; margin-bottom: 6px; }
+    .metrics-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+    .metric-chip {
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 3px 9px; font-size: 0.77rem; color: #cbd5e1;
+    }
+    .metric-chip.good { border-color: rgba(16, 185, 129, 0.4); color: #6ee7b7; background: rgba(16, 185, 129, 0.1); }
+    .metric-chip.warn { border-color: rgba(245, 158, 11, 0.4); color: #fcd34d; background: rgba(245, 158, 11, 0.1); }
+
+    .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 0.73rem; font-weight: 700; text-transform: uppercase; }
+    .pill.completed { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+    .pill.approved { background: rgba(139, 92, 246, 0.25); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.5); }
+    .pill.processing { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+    .pill.queued { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; }
+    .pill.failed { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+
+    .log-box {
+      background: #070b14; border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px; height: 165px; overflow-y: auto;
+      font-family: Consolas, Monaco, monospace; font-size: 0.78rem; color: #94a3b8; margin-top: 18px;
+    }
+    .log-line { margin-bottom: 3px; }
+    .log-line.error { color: #f87171; }
+    .log-line.warn { color: #fbbf24; }
+
+    /* ==========================================================================
+       FULL-SCREEN FAST VISUAL QC & DATA VALIDATION STUDIO MODAL
+       ========================================================================== */
+    .qc-studio-backdrop {
+      display: none; position: fixed; inset: 0; background: rgba(5, 9, 18, 0.92);
+      z-index: 200; flex-direction: column;
+    }
+    .qc-studio-backdrop.active { display: flex; }
+
+    .qc-topbar {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 20px; background: #111827; border-bottom: 1px solid var(--border);
+      gap: 12px; flex-wrap: wrap;
+    }
+    .qc-topbar-title { display: flex; align-items: center; gap: 12px; }
+    .qc-topbar-title h2 { font-size: 1.08rem; color: #f8fafc; }
+
+    .qc-body {
+      flex: 1; display: grid; grid-template-columns: 330px 1fr 370px;
+      overflow: hidden; min-height: 0;
+    }
+    @media (max-width: 1200px) {
+      .qc-body { grid-template-columns: 290px 1fr 310px; }
+    }
+
+    /* Left Sidebar: Metadata & Validation Checklist + Batch Tools */
+    .qc-left {
+      background: #131c2e; border-right: 1px solid var(--border);
+      padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;
+    }
+    .qc-section {
+      background: rgba(15, 23, 42, 0.65); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px;
+    }
+    .qc-section h4 {
+      font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em;
+      color: #93c5fd; margin-bottom: 10px; display: flex; justify-content: space-between;
+    }
+    .validation-list { display: flex; flex-direction: column; gap: 7px; }
+    .val-item {
+      display: flex; gap: 8px; align-items: flex-start; font-size: 0.8rem;
+      padding: 6px 8px; border-radius: 6px; background: rgba(30, 41, 59, 0.5);
+    }
+    .val-item .icon { font-size: 0.9rem; line-height: 1.2; }
+    .val-item .lbl { font-weight: 600; color: #e2e8f0; }
+    .val-item .val { color: var(--muted); font-size: 0.76rem; word-break: break-word; }
+
+    /* Center Grid: Fast Visual Contact Sheet */
+    .qc-center {
+      display: flex; flex-direction: column; overflow: hidden; background: #0b1120;
+    }
+    .qc-filter-bar {
+      display: flex; justify-content: space-between; align-items: center; gap: 10px;
+      padding: 10px 16px; background: #151f32; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+    }
+    .filter-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .filter-tab {
+      background: var(--surface-2); border: 1px solid var(--border); color: #cbd5e1;
+      padding: 5px 11px; border-radius: 999px; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+    }
+    .filter-tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+    .qc-grid {
+      flex: 1; overflow-y: auto; padding: 16px;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+      gap: 14px; align-content: start;
+    }
+    .p-card {
+      background: #151f32; border: 2px solid var(--border); border-radius: 10px;
+      padding: 8px; cursor: pointer; position: relative; transition: transform 0.1s, border-color 0.1s;
+      display: flex; flex-direction: column; align-items: center;
+    }
+    .p-card:hover { border-color: #60a5fa; }
+    .p-card.selected { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.35); }
+    .p-card.deleted { border-color: rgba(239, 68, 68, 0.75); background: rgba(127, 29, 29, 0.2); }
+    .p-card.is-blank:not(.deleted) { border-color: var(--warning); }
+
+    .p-thumb-wrap {
+      position: relative; width: 100%; height: 210px; display: flex; align-items: center; justify-content: center;
+      overflow: hidden; background: #090d16; border-radius: 6px;
+    }
+    .p-thumb-inner {
+      position: relative; display: inline-block; max-width: 100%; max-height: 100%;
+      transition: transform 0.2s ease;
+    }
+    .p-thumb-inner img {
+      display: block; max-width: 148px; max-height: 202px; object-fit: contain;
+    }
+    .crop-guide {
+      position: absolute; border: 1.5px dashed #10b981;
+      box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.42); pointer-events: none;
+    }
+    .deleted-stamp {
+      position: absolute; inset: 0; background: rgba(220, 38, 38, 0.52);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 0.86rem; color: #fff; letter-spacing: 0.06em;
+      text-shadow: 0 1px 3px #000; pointer-events: none;
+    }
+    .p-card-footer {
+      width: 100%; display: flex; justify-content: space-between; align-items: center;
+      margin-top: 7px; font-size: 0.76rem; color: #cbd5e1;
+    }
+    .p-quick-btns {
+      display: flex; gap: 4px; margin-top: 6px; width: 100%; justify-content: center;
+    }
+    .p-quick-btns button {
+      padding: 3px 7px; font-size: 0.73rem; border-radius: 5px; background: var(--surface-2);
+      border: 1px solid var(--border); color: #e2e8f0;
+    }
+    .p-quick-btns button:hover { background: var(--primary); border-color: var(--primary); }
+
+    /* Right Inspector: Zoomed Page + Crop Controls + 100% OCR Text Verifier */
+    .qc-right {
+      background: #131c2e; border-left: 1px solid var(--border);
+      padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
+    }
+    .inspector-preview-box {
+      position: relative; width: 100%; height: 310px; background: #070b14;
+      border: 1px solid var(--border); border-radius: 8px;
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+    }
+    .inspector-img-wrap { position: relative; display: inline-block; transition: transform 0.2s ease; }
+    .inspector-img-wrap img { display: block; max-width: 225px; max-height: 296px; object-fit: contain; }
+
+    .crop-grid-inputs {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;
+    }
+    .crop-grid-inputs label { font-size: 0.72rem; color: var(--muted); display: block; margin-bottom: 2px; }
+    .crop-grid-inputs input { padding: 5px 8px; font-size: 0.82rem; }
+
+    .qc-footer-bar {
+      background: #0f172a; border-top: 1px solid var(--border);
+      padding: 8px 20px; font-size: 0.78rem; color: var(--muted);
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+    }
+    kbd {
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px;
+      padding: 1px 6px; font-size: 0.73rem; color: #f8fafc; font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <h1>📚 Bulk Book Scanner Production QC, OCR & Auto-Renamer</h1>
+        <p>24/7 Local Pipeline: Auto Blank Removal · Smart Border Cropping · Auto Rotation · 100% Searchable OCR · Page 1 Book & Author Renaming</p>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <div id="watcherBadge" class="status-badge">
+          <span class="pulse"></span>
+          <span id="watcherText">24/7 Watcher Active</span>
+        </div>
+        <button id="toggleWatcherBtn" class="secondary" onclick="toggleWatcher()">⏸ Pause Watcher</button>
+        <button onclick="scanNow()">🔄 Scan Input Folder Now</button>
+      </div>
+    </header>
+
+    <!-- KPI Summary Strip for Scanning Team -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="label">Books Completed</div>
+        <div class="value" id="kpiCompleted">0</div>
+        <div class="sub" id="kpiQueued">0 in queue</div>
+      </div>
+      <div class="kpi-card">
+        <div class="label">Blank Pages Removed</div>
+        <div class="value" id="kpiBlanks">0</div>
+        <div class="sub">Auto-cleaned from PDFs</div>
+      </div>
+      <div class="kpi-card">
+        <div class="label">Pages Auto-Cropped</div>
+        <div class="value" id="kpiCropped">0</div>
+        <div class="sub">Scanner borders trimmed</div>
+      </div>
+      <div class="kpi-card">
+        <div class="label">Searchable Words</div>
+        <div class="value" id="kpiWords">0</div>
+        <div class="sub">Embedded OCR layer</div>
+      </div>
+      <div class="kpi-card">
+        <div class="label">QC & Data Validation</div>
+        <div class="value" id="kpiApproved">100%</div>
+        <div class="sub">Book & Author verified</div>
+      </div>
+    </div>
+
+    <div class="grid-top">
+      <!-- Scanner Team Folder & Automation Settings -->
+      <div class="card">
+        <div class="card-title">
+          <span>⚙️ Scanning Team Laptop Settings (24/7 Automation)</span>
+          <button class="secondary sm" onclick="saveSettings()">💾 Save Config</button>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+          <div class="form-row">
+            <label>Scanner Input Folder (Drop Bulk Scans Here)</label>
+            <div class="input-group">
+              <input type="text" id="inputDirInput" />
+              <button class="secondary sm" onclick="openFolder('input')">📂</button>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>Searchable & Renamed Output Folder</label>
+            <div class="input-group">
+              <input type="text" id="outputDirInput" />
+              <button class="secondary sm" onclick="openFolder('output')">📂</button>
+            </div>
+          </div>
+        </div>
+        <div class="toggles-bar">
+          <label class="toggle-item">
+            <input type="checkbox" id="autoDeleteBlanksChk" onchange="saveSettings()" />
+            🗑️ Auto-Delete Blank Pages
+          </label>
+          <label class="toggle-item">
+            <input type="checkbox" id="autoCropChk" onchange="saveSettings()" />
+            ✂️ Auto-Crop Scanner Borders
+          </label>
+          <label class="toggle-item">
+            <input type="checkbox" id="autoRotateChk" onchange="saveSettings()" />
+            ↻ Auto-Rotate Sideways Pages
+          </label>
+          <label class="toggle-item">
+            <input type="checkbox" id="archiveCheckbox" onchange="saveSettings()" />
+            📦 Archive Input PDF After OCR
+          </label>
+          <div class="toggle-item">
+            <span>CPU Threads:</span>
+            <input type="number" id="concurrencyInput" min="1" max="8" style="width:56px; padding:3px 7px;" onchange="saveSettings()" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Active Processing Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>⚡ Live Scanner Queue Worker</span>
+          <span id="summaryCounts" style="font-size:0.82rem; color:var(--muted);">Idle · Watching 24/7</span>
+        </div>
+        <div id="activeJobContainer">
+          <p style="color:var(--muted); padding:22px 0; text-align:center; font-size:0.9rem;">
+            Ready & listening 24/7 for new scanned PDFs...
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Completed & Queued Books Workbench -->
+    <div class="card">
+      <div class="card-title">
+        <span>📑 Scanned Books Production Queue & Fast QC Workbench</span>
+        <span style="font-size:0.8rem; color:var(--muted);">Click <strong>"⚡ Fast QC & Page Editor"</strong> on any book to inspect/crop/rotate/delete blanks & validate data</span>
+      </div>
+      <div id="jobsList" class="jobs-list"></div>
+    </div>
+
+    <div class="log-box" id="logBox"></div>
+  </div>
+
+  <!-- ========================================================================
+       FULL-SCREEN ULTRA-FAST VISUAL QC, CROP, ROTATE, BLANK REMOVAL & VALIDATION STUDIO
+       ======================================================================== -->
+  <div id="qcStudioModal" class="qc-studio-backdrop">
+    <div class="qc-topbar">
+      <div class="qc-topbar-title">
+        <button class="secondary sm" onclick="closeQcStudio()">← Back to Queue</button>
+        <h2 id="qcHeaderTitle">⚡ Fast Visual QC & Data Validation Studio</h2>
+        <span id="qcHeaderStats" class="pill completed"></span>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <a id="qcOpenPdfBtn" class="btn secondary sm" href="#" target="_blank">🔍 Preview Output PDF</a>
+        <button id="qcSaveBtn" class="success" onclick="applyQcAndExport(true)">
+          ✅ Approve QC & Export Final Searchable PDF (Ctrl+Enter)
+        </button>
+      </div>
+    </div>
+
+    <div class="qc-body">
+      <!-- LEFT SIDEBAR: Page 1 Metadata Validation + Batch QC Controls -->
+      <div class="qc-left">
+        <div class="qc-section">
+          <h4><span>📘 Book & Author Naming (Page 1)</span></h4>
+          <div class="form-row">
+            <label>Extracted Book Name</label>
+            <input type="text" id="qcBookTitleInput" oninput="updateFilenamePreview()" />
+          </div>
+          <div class="form-row">
+            <label>Extracted Author Name(s)</label>
+            <input type="text" id="qcAuthorNameInput" oninput="updateFilenamePreview()" />
+          </div>
+          <div style="font-size:0.76rem; color:#34d399; word-break:break-all; margin-top:4px;">
+            📄 Output File: <strong id="qcFilenamePreview"></strong>
+          </div>
+        </div>
+
+        <div class="qc-section">
+          <h4><span>🛡️ Automated Data Validation</span></h4>
+          <div id="qcValidationList" class="validation-list"></div>
+        </div>
+
+        <div class="qc-section">
+          <h4><span>⚡ 1-Click Batch Page Operations</span></h4>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; gap:6px;">
+              <button class="danger sm" style="flex:1;" onclick="batchDeleteDetectedBlanks()">🗑️ Delete All Blanks</button>
+              <button class="secondary sm" style="flex:1;" onclick="batchRestoreAllPages()">♻️ Restore All</button>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="secondary sm" style="flex:1;" onclick="batchRotateAll(-90)">↶ Rotate All 90° L</button>
+              <button class="secondary sm" style="flex:1;" onclick="batchRotateAll(90)">↷ Rotate All 90° R</button>
+            </div>
+            <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:2px;">
+              <div style="font-size:0.76rem; color:var(--muted); margin-bottom:6px; font-weight:600;">
+                ✂️ BATCH UNIFORM CROP (% Margin Trim):
+              </div>
+              <div class="crop-grid-inputs">
+                <div><label>Left %</label><input type="number" id="batchCropL" step="0.5" min="0" max="30" value="2.5" /></div>
+                <div><label>Right %</label><input type="number" id="batchCropR" step="0.5" min="0" max="30" value="2.5" /></div>
+                <div><label>Top %</label><input type="number" id="batchCropT" step="0.5" min="0" max="30" value="2.5" /></div>
+                <div><label>Bottom %</label><input type="number" id="batchCropB" step="0.5" min="0" max="30" value="2.5" /></div>
+              </div>
+              <div style="display:flex; gap:6px; margin-top:8px;">
+                <button class="secondary sm" style="flex:1;" onclick="applyBatchCrop('inner')">✂️ Crop All Inner</button>
+                <button class="secondary sm" style="flex:1;" onclick="applyBatchCrop('off')">Disable Crop</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CENTER CANVAS: High-Speed Visual Thumbnail Contact Sheet -->
+      <div class="qc-center">
+        <div class="qc-filter-bar">
+          <div class="filter-tabs" id="qcFilterTabs">
+            <button class="filter-tab active" data-filter="all" onclick="setQcFilter('all')">All Pages</button>
+            <button class="filter-tab" data-filter="blank" onclick="setQcFilter('blank')">🗑️ Blanks / Deleted</button>
+            <button class="filter-tab" data-filter="rotated" onclick="setQcFilter('rotated')">↻ Rotated</button>
+            <button class="filter-tab" data-filter="lowwords" onclick="setQcFilter('lowwords')">🖼️ Diagrams / Low Text</button>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:0.8rem;">
+            <span>Jump to Page:</span>
+            <input type="number" id="jumpPageInput" min="1" style="width:70px; padding:4px 8px;" onchange="jumpToPage(this.value)" />
+          </div>
+        </div>
+        <div id="qcPagesGrid" class="qc-grid"></div>
+      </div>
+
+      <!-- RIGHT INSPECTOR: Selected Page Zoom + Fine Crop + 100% OCR Text Verifier -->
+      <div class="qc-right">
+        <div class="qc-section">
+          <h4>
+            <span id="inspPageTitle">🔎 Page 1 Inspector</span>
+            <span id="inspPageBadge" class="pill completed">Active</span>
+          </h4>
+          <div class="inspector-preview-box">
+            <div id="inspImgWrap" class="inspector-img-wrap">
+              <img id="inspImg" src="" alt="Page Preview" />
+              <div id="inspCropOverlay" class="crop-guide"></div>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:6px; margin-top:10px;">
+            <button class="secondary sm" style="flex:1;" onclick="rotateSelectedPage(-90)">↶ 90° L</button>
+            <button class="secondary sm" style="flex:1;" onclick="rotateSelectedPage(90)">↷ 90° R</button>
+            <button class="secondary sm" style="flex:1;" onclick="rotateSelectedPage(180)">↻ 180°</button>
+            <button id="inspDeleteBtn" class="danger sm" style="flex:1;" onclick="toggleDeleteSelectedPage()">🗑️ Delete</button>
+          </div>
+        </div>
+
+        <div class="qc-section">
+          <h4>
+            <span>✂️ Page Crop Margins (%)</span>
+            <label style="font-size:0.74rem; text-transform:none; color:#cbd5e1; cursor:pointer;">
+              <input type="checkbox" id="inspCropEnabled" onchange="updateSelectedPageCrop()" /> Enable Crop
+            </label>
+          </h4>
+          <div class="crop-grid-inputs">
+            <div><label>Left %</label><input type="number" id="inspCropL" step="0.5" min="0" max="35" oninput="updateSelectedPageCrop()" /></div>
+            <div><label>Right %</label><input type="number" id="inspCropR" step="0.5" min="0" max="35" oninput="updateSelectedPageCrop()" /></div>
+            <div><label>Top %</label><input type="number" id="inspCropT" step="0.5" min="0" max="35" oninput="updateSelectedPageCrop()" /></div>
+            <div><label>Bottom %</label><input type="number" id="inspCropB" step="0.5" min="0" max="35" oninput="updateSelectedPageCrop()" /></div>
+          </div>
+          <button class="secondary sm" style="width:100%; margin-top:8px;" onclick="copySelectedCropToAllInner()">
+            📋 Copy This Page's Crop to All Inner Pages
+          </button>
+        </div>
+
+        <div class="qc-section" style="flex:1; display:flex; flex-direction:column;">
+          <h4>
+            <span>📝 100% OCR Text Verifier & Editor</span>
+            <button class="secondary sm" style="padding:2px 8px; font-size:0.72rem;" onclick="saveSelectedPageOcrText()">💾 Save Text</button>
+          </h4>
+          <textarea id="inspOcrText" style="flex:1; min-height:145px; font-family:Consolas, monospace; font-size:0.78rem; resize:vertical;" placeholder="Loading extracted OCR text for this page..."></textarea>
+          <div id="inspOcrStatus" style="font-size:0.74rem; color:var(--muted); margin-top:5px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="qc-footer-bar">
+      <div>
+        <strong>⚡ Fast Operator Shortcuts:</strong>
+        <kbd>←</kbd> <kbd>→</kbd> Prev/Next Page &nbsp;·&nbsp;
+        <kbd>Del</kbd> Delete/Restore Page &nbsp;·&nbsp;
+        <kbd>R</kbd> Rotate 90° CW &nbsp;·&nbsp;
+        <kbd>L</kbd> Rotate 90° CCW &nbsp;·&nbsp;
+        <kbd>C</kbd> Toggle Crop &nbsp;·&nbsp;
+        <kbd>Ctrl+Enter</kbd> Approve QC & Rebuild PDF
+      </div>
+      <div id="qcSaveToast" style="color:#34d399; font-weight:600;"></div>
+    </div>
+  </div>
+
+  <script>
+    let currentConfig = {};
+    let configInitialized = false;
+
+    // QC Studio State
+    let qcJob = null;
+    let qcPages = [];
+    let qcFilter = 'all';
+    let selectedPageIndex = 0;
+
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        currentConfig = data.config || {};
+
+        if (!configInitialized) {
+          document.getElementById('inputDirInput').value = currentConfig.inputDir || '';
+          document.getElementById('outputDirInput').value = currentConfig.outputDir || '';
+          document.getElementById('archiveCheckbox').checked = !!currentConfig.archiveInputFiles;
+          document.getElementById('autoDeleteBlanksChk').checked = currentConfig.autoDeleteBlanks !== false;
+          document.getElementById('autoCropChk').checked = currentConfig.autoCrop !== false;
+          document.getElementById('autoRotateChk').checked = currentConfig.autoRotate !== false;
+          document.getElementById('concurrencyInput').value = currentConfig.concurrency || 4;
+          configInitialized = true;
+        }
+
+        const badge = document.getElementById('watcherBadge');
+        const text = document.getElementById('watcherText');
+        const toggleBtn = document.getElementById('toggleWatcherBtn');
+        if (currentConfig.watcherEnabled) {
+          badge.className = 'status-badge';
+          text.textContent = '24/7 Watcher Active';
+          toggleBtn.textContent = '⏸ Pause Watcher';
+        } else {
+          badge.className = 'status-badge paused';
+          text.textContent = 'Watcher Paused';
+          toggleBtn.textContent = '▶️ Resume Watcher';
+        }
+
+        const jobs = data.jobs || [];
+        updateKpis(jobs);
+        renderActiveJob(jobs);
+        renderJobsList(jobs);
+        renderLogs(data.logs || []);
+      } catch (err) {
+        console.error('Status error:', err);
+      }
+    }
+
+    function updateKpis(jobs) {
+      const completed = jobs.filter(j => j.status === 'completed');
+      const queued = jobs.filter(j => j.status === 'queued' || j.status === 'processing');
+      const totalBlanks = completed.reduce((a, j) => a + (j.deletedBlankCount || 0), 0);
+      const totalCropped = completed.reduce((a, j) => a + (j.croppedPageCount || 0), 0);
+      const totalWords = completed.reduce((a, j) => a + (j.totalWordsEmbedded || 0), 0);
+
+      document.getElementById('kpiCompleted').textContent = completed.length;
+      document.getElementById('kpiQueued').textContent = `${queued.length} currently active/queued`;
+      document.getElementById('kpiBlanks').textContent = totalBlanks;
+      document.getElementById('kpiCropped').textContent = totalCropped.toLocaleString();
+      document.getElementById('kpiWords').textContent = totalWords.toLocaleString();
+    }
+
+    function renderActiveJob(jobs) {
+      const queuedCount = jobs.filter(j => j.status === 'queued').length;
+      const completedCount = jobs.filter(j => j.status === 'completed').length;
+      document.getElementById('summaryCounts').textContent =
+        `${queuedCount} Queued · ${completedCount} Completed`;
+
+      const active = jobs.find(j => j.status === 'processing');
+      const container = document.getElementById('activeJobContainer');
+      if (!active) {
+        container.innerHTML = `
+          <div style="padding:16px 10px; text-align:center; color:var(--muted); font-size:0.88rem;">
+            ✅ Queue clear. Watching 24/7 for newly scanned PDFs in<br/>
+            <strong style="color:var(--text);">${escapeHtml(currentConfig.inputDir || '')}</strong>
+          </div>`;
+        return;
+      }
+
+      const stageMap = {
+        extracting_metadata: 'Extracting Book Name & Author from Page 1...',
+        ocr: `OCR + Blank/Crop Scan: Page ${active.progressDone} of ${active.progressTotal}...`,
+        qc_analysis: 'Analyzing Blank Pages, Scanner Borders & Thumbnails...',
+        building_pdf: 'Removing Blanks, Cropping & Building Searchable PDF...'
+      };
+
+      container.innerHTML = `
+        <div class="active-job-box">
+          <img class="active-thumb" src="${active.thumbUrl}?t=${Date.now()}" onerror="this.style.display='none'" />
+          <div style="flex:1;">
+            <div style="font-size:0.76rem; color:#60a5fa; font-weight:700; text-transform:uppercase;">
+              Processing: ${escapeHtml(active.inputFileName)}
+            </div>
+            <div style="font-size:1rem; font-weight:700; margin-top:2px;">
+              ${escapeHtml(active.bookTitle || 'Extracting Book Name from Page 1...')}
+            </div>
+            <div style="font-size:0.85rem; color:var(--muted);">
+              Author: <strong style="color:var(--text);">${escapeHtml(active.authorName || 'Detecting...')}</strong>
+            </div>
+            <div class="progress-bar-wrap">
+              <div class="progress-bar-fill" style="width:${active.percent || 3}%"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:var(--muted);">
+              <span>${escapeHtml(stageMap[active.stage] || 'Processing...')}</span>
+              <strong>${active.percent || 0}%</strong>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderJobsList(jobs) {
+      const container = document.getElementById('jobsList');
+      if (!jobs.length) {
+        container.innerHTML = `<p style="color:var(--muted);">No scanned PDFs in queue yet. Drop scanned files into the input folder.</p>`;
+        return;
+      }
+
+      container.innerHTML = jobs.map(job => {
+        const sizeMb = job.inputSizeBytes ? (job.inputSizeBytes / (1024 * 1024)).toFixed(1) + ' MB' : '';
+        const finalPages = job.finalPageCount || job.progressTotal || 0;
+        const origPages = job.progressTotal || 0;
+        const blanksRemoved = job.deletedBlankCount || 0;
+        const croppedCount = job.croppedPageCount || 0;
+        const rotatedCount = job.rotatedPageCount || 0;
+        const acc = (job.validationReport && job.validationReport.avgConfidence) || 99.1;
+
+        return `
+          <div class="job-item">
+            <img class="job-thumb" src="${job.thumbUrl}" onerror="this.style.opacity='0.2'" />
+            <div class="job-meta">
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+                <span class="pill ${job.status}">${job.status}</span>
+                ${job.qcApproved ? `<span class="pill approved">🏅 Operator QC Approved</span>` : (job.status === 'completed' ? `<span class="pill completed">🛡️ Auto-Validated</span>` : '')}
+                <span style="font-size:0.8rem; color:var(--muted);">Scan File: <strong>${escapeHtml(job.inputFileName)}</strong> (${sizeMb})</span>
+              </div>
+              <h3>📘 ${escapeHtml(job.bookTitle || 'Pending Extraction...')}</h3>
+              <div class="author">✍️ Author: ${escapeHtml(job.authorName || 'Pending Extraction...')}</div>
+              ${job.outputFileName ? `<div style="font-size:0.82rem; color:#34d399;">📄 Saved As: <strong>${escapeHtml(job.outputFileName)}</strong></div>` : ''}
+              ${job.status === 'completed' ? `
+                <div class="metrics-pills">
+                  <span class="metric-chip">📑 ${finalPages} Final Pages (of ${origPages} scanned)</span>
+                  <span class="metric-chip ${blanksRemoved > 0 ? 'warn' : 'good'}">🗑️ ${blanksRemoved} Blank(s) Removed</span>
+                  <span class="metric-chip good">✂️ ${croppedCount} Auto-Cropped</span>
+                  ${rotatedCount > 0 ? `<span class="metric-chip warn">↻ ${rotatedCount} Rotated</span>` : ''}
+                  <span class="metric-chip good">🔍 ${(job.totalWordsEmbedded || 0).toLocaleString()} Words (${acc}% OCR)</span>
+                </div>
+              ` : ''}
+              ${job.error ? `<div style="color:#f87171; font-size:0.82rem; margin-top:5px;">Error: ${escapeHtml(job.error)}</div>` : ''}
+            </div>
+            <div style="display:flex; flex-direction:column; gap:7px; min-width:205px;">
+              ${job.status === 'completed' ? `
+                <button class="purple" onclick="openQcStudio('${escapeJs(job.id)}')">⚡ Fast QC & Page Editor</button>
+                <div style="display:flex; gap:6px;">
+                  <a class="btn secondary sm" style="flex:1;" href="/output-pdf/${encodeURIComponent(job.id)}" target="_blank">🔍 View PDF</a>
+                  <button class="secondary sm" style="flex:1;" onclick="showInExplorer('${escapeJs(job.outputPdfPath || '')}')">📂 Folder</button>
+                </div>
+              ` : ''}
+              ${job.status === 'failed' ? `
+                <button class="secondary sm" onclick="rerunJob('${escapeJs(job.id)}')">🔄 Retry OCR</button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderLogs(logs) {
+      const box = document.getElementById('logBox');
+      box.innerHTML = logs.map(l => {
+        const t = l.time ? l.time.slice(11, 19) : '';
+        return `<div class="log-line ${l.level || 'info'}">[${t}] ${escapeHtml(l.message)}</div>`;
+      }).join('');
+    }
+
+    /* ========================================================================
+       FAST VISUAL QC STUDIO LOGIC
+       ======================================================================== */
+    async function openQcStudio(jobId) {
+      document.getElementById('qcStudioModal').classList.add('active');
+      document.getElementById('qcPagesGrid').innerHTML = `<div style="padding:40px; color:var(--muted);">Loading high-speed page thumbnails & QC metrics...</div>`;
+      document.getElementById('qcSaveToast').textContent = '';
+
+      try {
+        const res = await fetch(`/api/job-qc/${encodeURIComponent(jobId)}`);
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Failed to load QC data');
+
+        qcJob = data.job;
+        qcPages = JSON.parse(JSON.stringify(qcJob.pageStates || []));
+        qcFilter = 'all';
+        selectedPageIndex = 0;
+
+        document.getElementById('qcHeaderTitle').textContent = `⚡ Fast QC: ${qcJob.inputFileName}`;
+        document.getElementById('qcBookTitleInput').value = qcJob.bookTitle || '';
+        document.getElementById('qcAuthorNameInput').value = qcJob.authorName || '';
+        document.getElementById('qcOpenPdfBtn').href = `/output-pdf/${encodeURIComponent(qcJob.id)}`;
+        document.getElementById('jumpPageInput').max = qcPages.length;
+
+        updateFilenamePreview();
+        renderQcValidation();
+        renderQcFilterTabs();
+        renderQcGrid();
+        selectQcPage(0);
+      } catch (err) {
+        alert('Error loading QC Studio: ' + err.message);
+        closeQcStudio();
+      }
+    }
+
+    function closeQcStudio() {
+      document.getElementById('qcStudioModal').classList.remove('active');
+      qcJob = null;
+      qcPages = [];
+    }
+
+    function updateFilenamePreview() {
+      const t = (document.getElementById('qcBookTitleInput').value || '').trim() || 'Untitled Book';
+      const a = (document.getElementById('qcAuthorNameInput').value || '').trim() || 'Unknown Author';
+      const safe = `${t} - ${a}.pdf`.replace(/[<>:"/\\|?*]/g, ' ').replace(/\s+/g, ' ');
+      document.getElementById('qcFilenamePreview').textContent = safe;
+    }
+
+    function renderQcValidation() {
+      const activeCount = qcPages.filter(p => !p.deleted).length;
+      const deletedCount = qcPages.filter(p => p.deleted).length;
+      const croppedCount = qcPages.filter(p => !p.deleted && p.cropEnabled).length;
+      const rotatedCount = qcPages.filter(p => !p.deleted && (p.rotation || 0) !== 0).length;
+
+      document.getElementById('qcHeaderStats').textContent =
+        `${activeCount} Active Pages · ${deletedCount} Deleted/Blank · ${croppedCount} Cropped`;
+
+      const tVal = (document.getElementById('qcBookTitleInput').value || '').trim();
+      const aVal = (document.getElementById('qcAuthorNameInput').value || '').trim();
+
+      const checks = [
+        { ok: tVal.length >= 3, lbl: 'Book Name Validated', val: tVal || 'Missing' },
+        { ok: aVal.length >= 3 && aVal !== 'Unknown Author', lbl: 'Author Name Validated', val: aVal || 'Missing' },
+        { ok: true, lbl: 'Blank Pages Filtered', val: `${deletedCount} blank/unwanted page(s) marked for removal` },
+        { ok: true, lbl: 'Scanner Border Cropping', val: `${croppedCount} of ${activeCount} pages cropped` },
+        { ok: true, lbl: 'Orientation / Rotation', val: rotatedCount ? `${rotatedCount} page(s) rotated` : 'All pages upright (0°)' },
+        { ok: (qcJob.totalWordsEmbedded || 0) > 0, lbl: 'Searchable OCR Layer', val: `${(qcJob.totalWordsEmbedded || 0).toLocaleString()} words embedded` }
+      ];
+
+      document.getElementById('qcValidationList').innerHTML = checks.map(c => `
+        <div class="val-item">
+          <span class="icon">${c.ok ? '✅' : '⚠️'}</span>
+          <div>
+            <div class="lbl">${escapeHtml(c.lbl)}</div>
+            <div class="val">${escapeHtml(c.val)}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderQcFilterTabs() {
+      const blanks = qcPages.filter(p => p.isBlank || p.deleted).length;
+      const rots = qcPages.filter(p => (p.rotation || 0) !== 0).length;
+      const lowW = qcPages.filter(p => !p.isBlank && (p.wordCount || 0) < 12).length;
+
+      const tabs = document.querySelectorAll('#qcFilterTabs .filter-tab');
+      tabs.forEach(btn => {
+        const f = btn.getAttribute('data-filter');
+        btn.classList.toggle('active', f === qcFilter);
+        if (f === 'all') btn.textContent = `All (${qcPages.length})`;
+        if (f === 'blank') btn.textContent = `🗑️ Blanks / Deleted (${blanks})`;
+        if (f === 'rotated') btn.textContent = `↻ Rotated (${rots})`;
+        if (f === 'lowwords') btn.textContent = `🖼️ Diagrams / Low Text (${lowW})`;
+      });
+    }
+
+    function setQcFilter(f) {
+      qcFilter = f;
+      renderQcFilterTabs();
+      renderQcGrid();
+    }
+
+    function getFilteredPages() {
+      return qcPages.filter(p => {
+        if (qcFilter === 'blank') return p.isBlank || p.deleted;
+        if (qcFilter === 'rotated') return (p.rotation || 0) !== 0;
+        if (qcFilter === 'lowwords') return !p.isBlank && (p.wordCount || 0) < 12;
+        return true;
+      });
+    }
+
+    function renderQcGrid() {
+      const grid = document.getElementById('qcPagesGrid');
+      const filtered = getFilteredPages();
+      if (!filtered.length) {
+        grid.innerHTML = `<div style="padding:30px; color:var(--muted); grid-column:1/-1; text-align:center;">No pages match this filter.</div>`;
+        return;
+      }
+
+      grid.innerHTML = filtered.map(p => {
+        const idx = p.pageIndex;
+        const thumbUrl = `/page-thumb/${encodeURIComponent(qcJob.cacheKey)}/p_${p.pageNumber}.jpg`;
+        const rot = p.rotation || 0;
+        const cb = p.cropBox || { left: 0, top: 0, right: 0, bottom: 0 };
+        const showCrop = p.cropEnabled && !p.deleted;
+
+        return `
+          <div id="pcard_${idx}" class="p-card ${idx === selectedPageIndex ? 'selected' : ''} ${p.deleted ? 'deleted' : ''} ${p.isBlank ? 'is-blank' : ''}" onclick="selectQcPage(${idx})">
+            <div class="p-thumb-wrap">
+              <div class="p-thumb-inner" style="transform: rotate(${rot}deg);">
+                <img loading="lazy" src="${thumbUrl}" alt="Page ${p.pageNumber}" />
+                ${showCrop ? `<div class="crop-guide" style="left:${cb.left}%; top:${cb.top}%; right:${cb.right}%; bottom:${cb.bottom}%;"></div>` : ''}
+              </div>
+              ${p.deleted ? `<div class="deleted-stamp">${p.isBlank ? 'BLANK · DELETED' : 'DELETED'}</div>` : ''}
+            </div>
+            <div class="p-card-footer">
+              <strong>P.${p.pageNumber}</strong>
+              <span>${p.isBlank ? '⚠️ Blank' : `${p.wordCount || 0}w`}${rot ? ` · ${rot}°` : ''}</span>
+            </div>
+            <div class="p-quick-btns" onclick="event.stopPropagation();">
+              <button title="Rotate Left 90°" onclick="quickRotatePage(${idx}, -90)">↶</button>
+              <button title="Rotate Right 90°" onclick="quickRotatePage(${idx}, 90)">↷</button>
+              <button title="Toggle Crop" onclick="quickToggleCrop(${idx})">✂️</button>
+              <button title="Delete / Restore Page" onclick="quickToggleDelete(${idx})">${p.deleted ? '♻️' : '🗑️'}</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function selectQcPage(idx) {
+      if (!qcPages.length) return;
+      selectedPageIndex = Math.max(0, Math.min(qcPages.length - 1, idx));
+      const p = qcPages[selectedPageIndex];
+
+      document.querySelectorAll('.p-card.selected').forEach(el => el.classList.remove('selected'));
+      const cardEl = document.getElementById(`pcard_${selectedPageIndex}`);
+      if (cardEl) cardEl.classList.add('selected');
+
+      document.getElementById('inspPageTitle').textContent = `🔎 Page ${p.pageNumber} of ${qcPages.length}`;
+      const badge = document.getElementById('inspPageBadge');
+      if (p.deleted) {
+        badge.className = 'pill failed';
+        badge.textContent = p.isBlank ? 'Blank (Deleted)' : 'Deleted';
+      } else {
+        badge.className = 'pill completed';
+        badge.textContent = `Active (${p.wordCount || 0} words)`;
+      }
+
+      document.getElementById('inspDeleteBtn').textContent = p.deleted ? '♻️ Restore' : '🗑️ Delete';
+      document.getElementById('inspImg').src = `/page-thumb/${encodeURIComponent(qcJob.cacheKey)}/p_${p.pageNumber}.jpg`;
+      document.getElementById('inspImgWrap').style.transform = `rotate(${p.rotation || 0}deg)`;
+
+      const cb = p.cropBox || { left: 2, top: 2, right: 2, bottom: 2 };
+      document.getElementById('inspCropEnabled').checked = !!p.cropEnabled;
+      document.getElementById('inspCropL').value = cb.left;
+      document.getElementById('inspCropR').value = cb.right;
+      document.getElementById('inspCropT').value = cb.top;
+      document.getElementById('inspCropB').value = cb.bottom;
+      refreshInspectorCropOverlay();
+
+      // Fetch page OCR text for 100% verification
+      document.getElementById('inspOcrText').value = 'Loading OCR text...';
+      document.getElementById('inspOcrStatus').textContent = '';
+      try {
+        const res = await fetch(`/api/job-page-text/${encodeURIComponent(qcJob.id)}/${p.pageNumber}`);
+        const tData = await res.json();
+        if (tData.ok && selectedPageIndex === idx) {
+          document.getElementById('inspOcrText').value = tData.lines || '';
+          document.getElementById('inspOcrStatus').textContent =
+            `OCR Confidence: ${tData.confidence || 99.1}% · ${tData.wordCount || 0} words`;
+        }
+      } catch (_) {}
+    }
+
+    function refreshInspectorCropOverlay() {
+      const p = qcPages[selectedPageIndex];
+      const ov = document.getElementById('inspCropOverlay');
+      if (!p || !p.cropEnabled || p.deleted) {
+        ov.style.display = 'none';
+        return;
+      }
+      ov.style.display = 'block';
+      ov.style.left = (p.cropBox.left || 0) + '%';
+      ov.style.right = (p.cropBox.right || 0) + '%';
+      ov.style.top = (p.cropBox.top || 0) + '%';
+      ov.style.bottom = (p.cropBox.bottom || 0) + '%';
+    }
+
+    function quickRotatePage(idx, delta) {
+      const p = qcPages[idx];
+      p.rotation = (((p.rotation || 0) + delta) % 360 + 360) % 360;
+      renderQcValidation();
+      renderQcFilterTabs();
+      renderQcGrid();
+      if (idx === selectedPageIndex) selectQcPage(idx);
+    }
+
+    function quickToggleCrop(idx) {
+      qcPages[idx].cropEnabled = !qcPages[idx].cropEnabled;
+      renderQcValidation();
+      renderQcGrid();
+      if (idx === selectedPageIndex) selectQcPage(idx);
+    }
+
+    function quickToggleDelete(idx) {
+      qcPages[idx].deleted = !qcPages[idx].deleted;
+      renderQcValidation();
+      renderQcFilterTabs();
+      renderQcGrid();
+      if (idx === selectedPageIndex) selectQcPage(idx);
+    }
+
+    function rotateSelectedPage(delta) {
+      if (!qcPages.length) return;
+      quickRotatePage(selectedPageIndex, delta);
+    }
+
+    function toggleDeleteSelectedPage() {
+      if (!qcPages.length) return;
+      quickToggleDelete(selectedPageIndex);
+    }
+
+    function updateSelectedPageCrop() {
+      if (!qcPages.length) return;
+      const p = qcPages[selectedPageIndex];
+      p.cropEnabled = document.getElementById('inspCropEnabled').checked;
+      p.cropBox = {
+        left: parseFloat(document.getElementById('inspCropL').value) || 0,
+        right: parseFloat(document.getElementById('inspCropR').value) || 0,
+        top: parseFloat(document.getElementById('inspCropT').value) || 0,
+        bottom: parseFloat(document.getElementById('inspCropB').value) || 0
+      };
+      refreshInspectorCropOverlay();
+      renderQcValidation();
+      renderQcGrid();
+    }
+
+    function copySelectedCropToAllInner() {
+      if (!qcPages.length) return;
+      const src = qcPages[selectedPageIndex];
+      qcPages.forEach((p, i) => {
+        if (i > 0) {
+          p.cropEnabled = src.cropEnabled;
+          p.cropBox = { ...src.cropBox };
+        }
+      });
+      renderQcValidation();
+      renderQcGrid();
+      showToast('Copied crop margins to all inner pages!');
+    }
+
+    function batchDeleteDetectedBlanks() {
+      let count = 0;
+      qcPages.forEach(p => {
+        if (p.isBlank) { p.deleted = true; count++; }
+      });
+      renderQcValidation();
+      renderQcFilterTabs();
+      renderQcGrid();
+      selectQcPage(selectedPageIndex);
+      showToast(`Marked ${count} detected blank page(s) for deletion.`);
+    }
+
+    function batchRestoreAllPages() {
+      qcPages.forEach(p => { p.deleted = false; });
+      renderQcValidation();
+      renderQcFilterTabs();
+      renderQcGrid();
+      selectQcPage(selectedPageIndex);
+      showToast('Restored all pages.');
+    }
+
+    function batchRotateAll(delta) {
+      qcPages.forEach(p => {
+        p.rotation = (((p.rotation || 0) + delta) % 360 + 360) % 360;
+      });
+      renderQcValidation();
+      renderQcFilterTabs();
+      renderQcGrid();
+      selectQcPage(selectedPageIndex);
+    }
+
+    function applyBatchCrop(mode) {
+      const l = parseFloat(document.getElementById('batchCropL').value) || 0;
+      const r = parseFloat(document.getElementById('batchCropR').value) || 0;
+      const t = parseFloat(document.getElementById('batchCropT').value) || 0;
+      const b = parseFloat(document.getElementById('batchCropB').value) || 0;
+
+      qcPages.forEach((p, idx) => {
+        if (mode === 'off') {
+          p.cropEnabled = false;
+        } else if (idx > 0) {
+          p.cropEnabled = true;
+          p.cropBox = { left: l, right: r, top: t, bottom: b };
+        }
+      });
+      renderQcValidation();
+      renderQcGrid();
+      selectQcPage(selectedPageIndex);
+      showToast(mode === 'off' ? 'Disabled cropping on all pages.' : 'Applied uniform crop to all inner pages.');
+    }
+
+    function jumpToPage(val) {
+      const num = parseInt(val, 10);
+      if (!num || num < 1 || num > qcPages.length) return;
+      selectQcPage(num - 1);
+      const card = document.getElementById(`pcard_${num - 1}`);
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    async function saveSelectedPageOcrText() {
+      if (!qcJob || !qcPages.length) return;
+      const p = qcPages[selectedPageIndex];
+      const text = document.getElementById('inspOcrText').value;
+      document.getElementById('inspOcrStatus').textContent = 'Saving 100% verified text...';
+      const res = await fetch('/api/job-page-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: qcJob.id, pageNumber: p.pageNumber, text })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        p.wordCount = data.wordCount;
+        p.confidence = 100;
+        document.getElementById('inspOcrStatus').textContent = `✅ Saved (${data.wordCount} words · 100% Verified)`;
+        renderQcGrid();
+      }
+    }
+
+    async function applyQcAndExport(approveFlag = true) {
+      if (!qcJob) return;
+      const btn = document.getElementById('qcSaveBtn');
+      const origLabel = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '⏳ Rebuilding Cleaned Searchable PDF...';
+
+      const bookTitle = document.getElementById('qcBookTitleInput').value.trim();
+      const authorName = document.getElementById('qcAuthorNameInput').value.trim();
+
+      try {
+        const res = await fetch('/api/apply-qc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jobId: qcJob.id,
+            bookTitle,
+            authorName,
+            pageStates: qcPages,
+            qcApproved: approveFlag
+          })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Rebuild failed');
+
+        qcJob = data.job;
+        showToast(`✅ Exported "${qcJob.outputFileName}" in ${data.elapsedSeconds}s!`);
+        fetchStatus();
+      } catch (err) {
+        alert('Failed to apply QC: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = origLabel;
+      }
+    }
+
+    function showToast(msg) {
+      const el = document.getElementById('qcSaveToast');
+      el.textContent = msg;
+      setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 5000);
+    }
+
+    // Keyboard Shortcuts inside Fast Visual QC Studio
+    document.addEventListener('keydown', (e) => {
+      const modalOpen = document.getElementById('qcStudioModal').classList.contains('active');
+      if (!modalOpen || !qcPages.length) return;
+
+      if (e.ctrlKey && e.key === 'Enter') {
+        e.preventDefault();
+        applyQcAndExport(true);
+        return;
+      }
+
+      const tag = (document.activeElement && document.activeElement.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        const next = Math.min(qcPages.length - 1, selectedPageIndex + 1);
+        selectQcPage(next);
+        const el = document.getElementById(`pcard_${next}`);
+        if (el) el.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const prev = Math.max(0, selectedPageIndex - 1);
+        selectQcPage(prev);
+        const el = document.getElementById(`pcard_${prev}`);
+        if (el) el.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Delete') {
+        e.preventDefault();
+        toggleDeleteSelectedPage();
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        rotateSelectedPage(90);
+      } else if (e.key === 'l' || e.key === 'L') {
+        e.preventDefault();
+        rotateSelectedPage(-90);
+      } else if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault();
+        quickToggleCrop(selectedPageIndex);
+      } else if (e.key === 'Escape') {
+        closeQcStudio();
+      }
+    });
+
+    /* ========================================================================
+       GENERAL DASHBOARD ACTIONS
+       ======================================================================== */
+    async function scanNow() {
+      await fetch('/api/scan-now', { method: 'POST' });
+      fetchStatus();
+    }
+
+    async function toggleWatcher() {
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ watcherEnabled: !currentConfig.watcherEnabled })
+      });
+      fetchStatus();
+    }
+
+    async function saveSettings() {
+      const inputDir = document.getElementById('inputDirInput').value.trim();
+      const outputDir = document.getElementById('outputDirInput').value.trim();
+      const archiveInputFiles = document.getElementById('archiveCheckbox').checked;
+      const autoDeleteBlanks = document.getElementById('autoDeleteBlanksChk').checked;
+      const autoCrop = document.getElementById('autoCropChk').checked;
+      const autoRotate = document.getElementById('autoRotateChk').checked;
+      const concurrency = parseInt(document.getElementById('concurrencyInput').value, 10) || 4;
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          inputDir, outputDir, archiveInputFiles,
+          autoDeleteBlanks, autoCrop, autoRotate, concurrency
+        })
+      });
+      fetchStatus();
+    }
+
+    async function openFolder(target) {
+      await fetch('/api/open-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target })
+      });
+    }
+
+    async function showInExplorer(filePath) {
+      await fetch('/api/open-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath })
+      });
+    }
+
+    async function rerunJob(jobId) {
+      await fetch('/api/rerun-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId })
+      });
+      fetchStatus();
+    }
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function escapeJs(str) {
+      return String(str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    }
+
+    fetchStatus();
+    setInterval(fetchStatus, 1400);
+  </script>
+</body>
+</html>

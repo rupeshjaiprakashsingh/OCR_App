@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Compiled local binaries (automatically built on install via Install_Client_Machine.bat)
+bin/
+
+# Runtime state, thumbnails, and OCR cache
+data/
+
+# Scanned PDF input, output, and archive folders (never push customer PDFs)
+inputScanningFiles/
+outputSearchableFiles/
+completedInputFiles/
+*.pdf
+
+# Logs and OS files
+*.log
+.DS_Store
+Thumbs.db
