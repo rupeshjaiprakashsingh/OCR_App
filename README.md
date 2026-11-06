@@ -1,37 +1,74 @@
-# Bulk Book Scanner Production QC, OCR & Smart Auto-Renamer Suite
+# Bulk Book Scanner Production QC, Searchable PDF OCR & Auto-Renamer Suite
 
-A fast, 100% local Windows application designed for **Bulk Book Scanning Teams**. After scanning documents into the input folder, this software automatically performs **Blank Page Deletion**, **Smart Scanner Border Cropping**, **Auto-Rotation**, **High-Accuracy Searchable PDF OCR**, **Book Name & Author Auto-Renaming from Page 1**, and provides a **High-Speed Visual QC & Data Validation Studio**.
+A fast, 100% local Windows 10/11 desktop & web application built for **Bulk Document & Book Scanning Teams**. Drop scanned PDF books into the input folder and the software runs **24/7** to automatically remove blank pages, crop black scanner borders, auto-rotate sideways pages, perform high-accuracy **Searchable PDF OCR**, validate data, and **rename every file with the Book Name & Author's Name extracted from Page 1**.
+
+---
+
+## Easy Installation on Any Client / Customer Windows Laptop
+
+Requires **Windows 10 or Windows 11 (64-bit)**. No paid API keys or third-party OCR installs required—uses built-in Windows native OCR + `.NET`.
+
+### Method 1: Easiest Download ZIP + 1-Click Installer (No Git Needed on Client PC)
+
+1. Open **https://github.com/rupeshjaiprakashsingh/OCR_App** on the client laptop.
+2. Click the green **`<> Code`** button $\rightarrow$ **`Download ZIP`**.
+3. Extract the ZIP folder to `C:\OCR_App` (or any folder on the laptop).
+4. Double-click **`Setup_Scanning_Team_Laptop.bat`**.
+   - Automatically installs **Node.js LTS** (if not already installed on the laptop).
+   - Installs PDF libraries (`pdf-lib`).
+   - Compiles the native Windows multi-threaded OCR & Blank/Crop binary (`bin\WinOcrEngine.exe`).
+   - Creates **3 ready-to-use Shortcuts right on the Customer's Desktop**:
+     1. **`Book Scanner QC & OCR`** — Launches the 24/7 Watcher & opens **http://localhost:3456**
+     2. **`1. Scanner Input Folder`** — Configure the scanner to save PDFs directly here
+     3. **`2. Searchable PDF Output Folder`** — Auto-renamed Searchable PDFs appear here
+
+---
+
+### Method 2: One-Command PowerShell Install (If Repo is Public)
+
+Open **PowerShell** on the client Windows 10/11 laptop and run:
+```powershell
+irm https://raw.githubusercontent.com/rupeshjaiprakashsingh/OCR_App/main/Install_From_GitHub.ps1 | iex
+```
+
+---
+
+### Method 3: Install via Git Clone
+
+```powershell
+git clone https://github.com/rupeshjaiprakashsingh/OCR_App.git C:\OCR_App
+cd C:\OCR_App
+.\Setup_Scanning_Team_Laptop.bat
+```
+
+---
+
+### Optional: Run Automatically in Background When Windows Starts (24/7 Mode)
+
+If the client laptop is a dedicated scanning station that should start the 24/7 OCR service silently every time Windows turns on:
+- Double-click **`Enable_24x7_Windows_AutoStart.bat`** once.
+- (To turn off auto-startup later, double-click **`Disable_24x7_Windows_AutoStart.bat`**.)
 
 ---
 
 ## Core Production Features
 
-1. **Smart Book Name & Author Extraction from Page 1 (`src/extractor.js`)**:
-   - Analyzes Page 1 (front cover) typography geometry (multi-size stacked titles, Roman numerals, possessives) and cross-verifies with inner Title Pages (academic degrees & affiliations).
-   - Automatically renames every output PDF to `<Book Name> - <Author Name>.pdf`.
-
-2. **Automatic Blank Page Detection & Removal**:
-   - Pixel-level inner-page ink-density analysis (`inkRatio`) combined with OCR word filtering automatically detects blank separator pages or empty inside covers (such as Page 2 of `1.pdf`) and removes them cleanly from the final PDF.
-
+1. **Page 1 Book Name & Author Extraction (`src/extractor.js`)**:
+   - Analyzes front cover typography (font-height hierarchy, multi-line titles, Roman numerals) and cross-verifies with inner title pages to automatically save files as `<Book Name> - <Author Name>.pdf`.
+2. **Automatic Blank Page Detection & Deletion**:
+   - Pixel-level ink-density scanning (`inkRatio`) + OCR word verification removes blank separator pages automatically.
 3. **Smart Scanner Border & Margin Cropping**:
-   - Detects black scanner lid shadows and content bounding boxes on every page and applies lossless PDF `CropBox` trimming without degrading image resolution.
-   - Supports per-page or 1-click batch uniform cropping in the Visual QC Studio.
-
+   - Detects black scanner lid borders and content bounds, applying lossless PDF `CropBox` trimming (plus per-page or batch uniform crop controls in the Visual QC Studio).
 4. **Auto-Orientation & Fast Page Rotation (`90° / 180° / 270°`)**:
-   - Automatically detects sideways or upside-down text pages during OCR and rotates them upright, with instant 1-click or `R` / `L` hotkey rotation in QC.
-
+   - Automatically detects sideways/upside-down text pages during OCR, with 1-click and hotkey rotation in QC.
 5. **High-Accuracy Searchable PDF Layer + Live Page Text Editor**:
-   - Embeds an invisible, coordinate-aligned text layer (`3 Tr` PDF rendering mode) over every scanned page so users can search (`Ctrl+F`) and copy/extract text across the entire book.
-   - Includes ligature normalization, border-speck filtering, and a live per-page OCR text verifier/editor inside the QC Studio for 100% verified text accuracy.
-
+   - Embeds an invisible, aligned text layer (`3 Tr` PDF rendering mode) over every scanned page for `Ctrl+F` search and copy/paste extraction, plus an in-app per-page OCR text editor.
 6. **Ultra-Fast Visual QC & Data Validation Studio (`http://localhost:3456`)**:
-   - **Contact-Sheet Thumbnail Grid** with instant filters (`All Pages`, `Blanks / Deleted`, `Rotated`, `Diagrams / Low Text`).
-   - **Automated 6-Point Data Validation Checklist** verifying Book Title, Author Name, Blank Removal, Cropping, Rotation, and Searchable Word Coverage.
-   - **2-Second PDF Rebuild**: Any QC adjustments (deleting/restoring pages, rotating, cropping, editing text, or renaming) rebuild the final Searchable PDF in seconds using cached OCR data.
+   - Full-book contact-sheet thumbnail grid, 6-point automated validation checklist, operator approval workflow, and **2-second PDF rebuilds**.
 
 ---
 
-## Operator Keyboard Shortcuts (Inside Fast QC Studio)
+## Operator Keyboard Shortcuts (Inside Fast Visual QC Studio)
 
 | Shortcut | Action |
 | :--- | :--- |
@@ -40,11 +77,3 @@ A fast, 100% local Windows application designed for **Bulk Book Scanning Teams**
 | `R` / `L` | Rotate Selected Page `90° CW` / `90° CCW` |
 | `C` | Toggle Crop on Selected Page |
 | `Ctrl + Enter` | **Approve QC & Export Final Searchable PDF** |
-
----
-
-## Deploying to Scanning Team Laptops
-
-1. Copy the `OCR_App` folder to any Windows 10/11 laptop.
-2. Double-click **[`Setup_Scanning_Team_Laptop.bat`](file:///C:/rupesh/OCR_App/Setup_Scanning_Team_Laptop.bat)** once (verifies Node.js, compiles the native Windows multi-threaded OCR engine, creates folders, and places a **"Book Scanner QC & OCR"** shortcut on the Desktop).
-3. Double-click **[`Start_24x7_OCR_Tool.bat`](file:///C:/rupesh/OCR_App/Start_24x7_OCR_Tool.bat)** (or the Desktop shortcut) to run 24/7 and open the Workbench at **http://localhost:3456**.

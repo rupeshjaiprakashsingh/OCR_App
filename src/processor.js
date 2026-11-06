@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const { extractBookMetadata, sanitizeFileName } = require('./extractor');
+const { ensureWinOcrBinary } = require('./ensureNativeBinary');
 const {
   buildSearchablePdf,
   readOcrJsonl,
@@ -9,7 +10,7 @@ const {
   createDefaultPageStates
 } = require('./pdfBuilder');
 
-const WIN_OCR_EXE = path.join(__dirname, '..', 'bin', 'WinOcrEngine.exe');
+const WIN_OCR_EXE = ensureWinOcrBinary();
 
 function generateThumbnail(pdfPath, thumbOutPath) {
   return new Promise((resolve) => {

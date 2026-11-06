@@ -1,7 +1,8 @@
 const { execFile } = require('child_process');
 const path = require('path');
+const { ensureWinOcrBinary } = require('./ensureNativeBinary');
 
-const WIN_OCR_EXE = path.join(__dirname, '..', 'bin', 'WinOcrEngine.exe');
+const WIN_OCR_EXE = ensureWinOcrBinary();
 
 const ROMAN_NUMERALS = new Set([
   'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',

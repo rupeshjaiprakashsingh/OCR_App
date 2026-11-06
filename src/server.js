@@ -840,6 +840,16 @@ const server = http.createServer(async (req, res) => {
 });
 
 const PORT = config.port || 3456;
+
+server.on('error', (err) => {
+  if (err && err.code === 'EADDRINUSE') {
+    console.log(`[INFO] 24/7 Book Scanner OCR Service is already running on http://localhost:${PORT}`);
+    process.exit(0);
+  }
+  console.error('Server error:', err);
+  process.exit(1);
+});
+
 server.listen(PORT, () => {
   addLog(`================================================================`);
   addLog(`24/7 Book Scanner Production QC, OCR & Auto-Renamer Suite Ready`);
