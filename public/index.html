@@ -330,6 +330,7 @@
           <span class="pulse"></span>
           <span id="watcherText">24/7 Watcher Active</span>
         </div>
+        <a class="btn success" href="/api/export-csv" download="Master_OCR_Batch_Tracking_Report.csv">📊 Export Excel / CSV Report</a>
         <button id="toggleWatcherBtn" class="secondary" onclick="toggleWatcher()">⏸ Pause Watcher</button>
         <button onclick="scanNow()">🔄 Scan Input Folder Now</button>
       </div>
@@ -338,9 +339,14 @@
     <!-- KPI Summary Strip for Scanning Team -->
     <div class="kpi-grid">
       <div class="kpi-card">
-        <div class="label">Books Completed</div>
-        <div class="value" id="kpiCompleted">0</div>
-        <div class="sub" id="kpiQueued">0 in queue</div>
+        <div class="label">Batch Progress</div>
+        <div class="value" id="kpiCompleted">0 / 0</div>
+        <div class="sub" id="kpiQueued">0 queued · 100% done</div>
+      </div>
+      <div class="kpi-card">
+        <div class="label">Turbo OCR Speed & ETA</div>
+        <div class="value" id="kpiSpeed">6.5 p/s</div>
+        <div class="sub" id="kpiEta">~80 Books/hr · 0m left</div>
       </div>
       <div class="kpi-card">
         <div class="label">Blank Pages Removed</div>
@@ -355,12 +361,7 @@
       <div class="kpi-card">
         <div class="label">Searchable Words</div>
         <div class="value" id="kpiWords">0</div>
-        <div class="sub">Embedded OCR layer</div>
-      </div>
-      <div class="kpi-card">
-        <div class="label">QC & Data Validation</div>
-        <div class="value" id="kpiApproved">100%</div>
-        <div class="sub">Book & Author verified</div>
+        <div class="sub">100% searchable PDF layer</div>
       </div>
     </div>
 
@@ -427,9 +428,17 @@
 
     <!-- Completed & Queued Books Workbench -->
     <div class="card">
-      <div class="card-title">
-        <span>📑 Scanned Books Production Queue & Fast QC Workbench</span>
-        <span style="font-size:0.8rem; color:var(--muted);">Click <strong>"⚡ Fast QC & Page Editor"</strong> on any book to inspect/crop/rotate/delete blanks & validate data</span>
+      <div class="card-title" style="flex-wrap:wrap; gap:12px;">
+        <span>📑 250-Book Batch Tracker & Fast QC Workbench</span>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; flex:1; justify-content:flex-end;">
+          <input type="text" id="bookSearchInput" placeholder="🔎 Search 250+ books by file (e.g. 81.pdf), Book Title, or Author..." style="max-width:340px; padding:6px 12px;" oninput="renderJobsList(lastJobsData)" />
+          <div class="filter-tabs" id="mainStatusTabs">
+            <button class="filter-tab active" data-st="all" onclick="setMainStatusFilter('all')">All</button>
+            <button class="filter-tab" data-st="completed" onclick="setMainStatusFilter('completed')">✅ Completed</button>
+            <button class="filter-tab" data-st="queued" onclick="setMainStatusFilter('queued')">⏳ Queued / Active</button>
+            <button class="filter-tab" data-st="approved" onclick="setMainStatusFilter('approved')">🏅 QC Approved</button>
+          </div>
+        </div>
       </div>
       <div id="jobsList" class="jobs-list"></div>
     </div>
@@ -593,6 +602,24 @@
   <script>
     let currentConfig = {};
     let configInitialized = false;
+    let lastJobsData = [];
+    let mainStatusFilter = 'all';
+
+    function setMainStatusFilter(st) {
+      mainStatusFilter = st;
+      document.querySelectorAll('#mainStatusTabs .filter-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-st') === st);
+      });
+      renderJobsList(lastJobsData);
+    }
+
+    function formatEta(sec) {
+      if (!sec || sec <= 0) return '0m left (Idle)';
+      if (sec < 60) return `${sec}s remaining`;
+      const hrs = Math.floor(sec / 3600);
+      const mins = Math.ceil((sec % 3600) / 60);
+      return hrs > 0 ? `~${hrs}h ${mins}m remaining` : `~${mins}m remaining`;
+    }
 
     // QC Studio State
     let qcJob = null;
@@ -631,7 +658,8 @@
         }
 
         const jobs = data.jobs || [];
-        updateKpis(jobs);
+        lastJobsData = jobs;
+        updateKpis(jobs, data.batchTelemetry || {});
         renderActiveJob(jobs);
         renderJobsList(jobs);
         renderLogs(data.logs || []);
@@ -640,15 +668,18 @@
       }
     }
 
-    function updateKpis(jobs) {
+    function updateKpis(jobs, tele) {
       const completed = jobs.filter(j => j.status === 'completed');
       const queued = jobs.filter(j => j.status === 'queued' || j.status === 'processing');
       const totalBlanks = completed.reduce((a, j) => a + (j.deletedBlankCount || 0), 0);
       const totalCropped = completed.reduce((a, j) => a + (j.croppedPageCount || 0), 0);
       const totalWords = completed.reduce((a, j) => a + (j.totalWordsEmbedded || 0), 0);
+      const pct = jobs.length > 0 ? Math.round((completed.length / jobs.length) * 100) : 100;
 
-      document.getElementById('kpiCompleted').textContent = completed.length;
-      document.getElementById('kpiQueued').textContent = `${queued.length} currently active/queued`;
+      document.getElementById('kpiCompleted').textContent = `${completed.length} / ${jobs.length}`;
+      document.getElementById('kpiQueued').textContent = `${queued.length} queued · ${pct}% complete`;
+      document.getElementById('kpiSpeed').textContent = `${tele.turboPagesPerSec || 6.5} pages/s`;
+      document.getElementById('kpiEta').textContent = `~${tele.booksPerHour || 80} Books/hr · ${formatEta(tele.etaSeconds || 0)}`;
       document.getElementById('kpiBlanks').textContent = totalBlanks;
       document.getElementById('kpiCropped').textContent = totalCropped.toLocaleString();
       document.getElementById('kpiWords').textContent = totalWords.toLocaleString();
@@ -705,12 +736,25 @@
 
     function renderJobsList(jobs) {
       const container = document.getElementById('jobsList');
-      if (!jobs.length) {
-        container.innerHTML = `<p style="color:var(--muted);">No scanned PDFs in queue yet. Drop scanned files into the input folder.</p>`;
+      const q = (document.getElementById('bookSearchInput') ? document.getElementById('bookSearchInput').value : '').trim().toLowerCase();
+
+      const filteredJobs = (jobs || []).filter(j => {
+        if (mainStatusFilter === 'completed' && j.status !== 'completed') return false;
+        if (mainStatusFilter === 'queued' && j.status !== 'queued' && j.status !== 'processing') return false;
+        if (mainStatusFilter === 'approved' && !j.qcApproved) return false;
+        if (q) {
+          const hay = `${j.inputFileName || ''} ${j.bookTitle || ''} ${j.authorName || ''} ${j.outputFileName || ''}`.toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+
+      if (!filteredJobs.length) {
+        container.innerHTML = `<p style="color:var(--muted);">No matching books found.</p>`;
         return;
       }
 
-      container.innerHTML = jobs.map(job => {
+      container.innerHTML = filteredJobs.map(job => {
         const sizeMb = job.inputSizeBytes ? (job.inputSizeBytes / (1024 * 1024)).toFixed(1) + ' MB' : '';
         const finalPages = job.finalPageCount || job.progressTotal || 0;
         const origPages = job.progressTotal || 0;

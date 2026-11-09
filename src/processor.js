@@ -25,18 +25,9 @@ function getCacheKeyForPdf(inputPdfPath) {
   return `${path.basename(inputPdfPath).replace(/[^a-zA-Z0-9._-]/g, '_')}_${stat.size}_${Math.floor(stat.mtimeMs)}`;
 }
 
-function runFullOcrProcess({
-  pdfPath,
-  outJsonlPath,
-  pageThumbsDir,
-  concurrency = 4,
-  scale = 1.6,
-  onProgress
-}) {
+function runRangeWorkerProcess({ pdfPath, partJsonlPath, startIdx, endIdx, threadsPerProc, onStep }) {
   return new Promise((resolve, reject) => {
-    const args = ['full', pdfPath, outJsonlPath, String(concurrency), String(scale)];
-    if (pageThumbsDir) args.push(pageThumbsDir);
-
+    const args = ['range', pdfPath, partJsonlPath, String(startIdx), String(endIdx), String(threadsPerProc)];
     const child = spawn(WIN_OCR_EXE, args, { windowsHide: true });
 
     let stderrData = '';
@@ -46,17 +37,9 @@ function runFullOcrProcess({
       buffer += chunk.toString('utf8');
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() || '';
-
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('START:')) {
-          const total = parseInt(trimmed.split(':')[1], 10) || 0;
-          if (onProgress) onProgress(0, total, 'ocr');
-        } else if (trimmed.startsWith('PROGRESS:')) {
-          const parts = trimmed.split(':');
-          const done = parseInt(parts[1], 10) || 0;
-          const total = parseInt(parts[2], 10) || 0;
-          if (onProgress) onProgress(done, total, 'ocr');
+        if (line.trim().startsWith('STEP:')) {
+          if (onStep) onStep();
         }
       }
     });
@@ -66,14 +49,90 @@ function runFullOcrProcess({
     });
 
     child.on('error', reject);
-
     child.on('close', (code) => {
       if (code !== 0) {
-        return reject(new Error(`WinOcrEngine full exited with code ${code}: ${stderrData}`));
+        return reject(new Error(`WinOcrEngine range [${startIdx}-${endIdx}] exited with code ${code}: ${stderrData}`));
       }
       resolve();
     });
   });
+}
+
+async function runFullOcrProcess({
+  pdfPath,
+  outJsonlPath,
+  totalPages,
+  concurrency = 4,
+  onProgress
+}) {
+  const numProcs = Math.max(1, Math.min(concurrency, totalPages || 4));
+  const threadsPerProc = 2;
+
+  if (!totalPages || totalPages <= 12 || numProcs <= 1) {
+    // Small PDF fallback to single process
+    await runRangeWorkerProcess({
+      pdfPath,
+      partJsonlPath: outJsonlPath,
+      startIdx: 0,
+      endIdx: totalPages || 9999,
+      threadsPerProc: 4,
+      onStep: () => {}
+    });
+    return;
+  }
+
+  let completedPages = 0;
+  if (onProgress) onProgress(0, totalPages, 'ocr');
+
+  const chunkSize = Math.ceil(totalPages / numProcs);
+  const partFiles = [];
+  const workerPromises = [];
+
+  for (let p = 0; p < numProcs; p++) {
+    const startIdx = p * chunkSize;
+    const endIdx = Math.min(totalPages, (p + 1) * chunkSize);
+    if (startIdx >= endIdx) continue;
+
+    const partPath = `${outJsonlPath}.part${p}`;
+    partFiles.push(partPath);
+
+    workerPromises.push(
+      runRangeWorkerProcess({
+        pdfPath,
+        partJsonlPath: partPath,
+        startIdx,
+        endIdx,
+        threadsPerProc,
+        onStep: () => {
+          completedPages++;
+          if (onProgress && (completedPages % 3 === 0 || completedPages === totalPages || completedPages === 1)) {
+            onProgress(completedPages, totalPages, 'ocr');
+          }
+        }
+      })
+    );
+  }
+
+  try {
+    await Promise.all(workerPromises);
+    // Concatenate all part files in exact page order
+    const outStream = fs.createWriteStream(outJsonlPath, { encoding: 'utf8' });
+    for (const partPath of partFiles) {
+      if (fs.existsSync(partPath)) {
+        const content = await fs.promises.readFile(partPath, 'utf8');
+        if (content) {
+          outStream.write(content.endsWith('\n') ? content : content + '\n');
+        }
+      }
+    }
+    await new Promise((res) => outStream.end(res));
+  } finally {
+    for (const partPath of partFiles) {
+      if (fs.existsSync(partPath)) {
+        try { fs.unlinkSync(partPath); } catch (_) {}
+      }
+    }
+  }
 }
 
 function runQcFastScan({ pdfPath, outMetricsJsonPath, pageThumbsDir, concurrency = 6 }) {
@@ -345,9 +404,8 @@ async function processScannedPdf({
     await runFullOcrProcess({
       pdfPath: inputPdfPath,
       outJsonlPath: tempJsonlPath,
-      pageThumbsDir,
+      totalPages: meta.pageCount,
       concurrency,
-      scale,
       onProgress: (done, total) => {
         if (onProgress) onProgress(done, total, 'ocr');
       }
