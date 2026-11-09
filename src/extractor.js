@@ -78,7 +78,7 @@ const NON_AUTHOR_PATTERNS = [
   /\b(diploma|semester|sem\b|degree|polytechnic)\b/i,
   /\b(group|branch|department|dept|division|section|faculty|school|center|centre|hospital|clinic)\b/i,
   /\b(institute|college|university|academy|vidyapeeth|bhavan|foundation|society)\b/i,
-  /\b(professor|lecturer|investigator|head|principal|dean|director|scholar|scientist|vice-?chair|endowed|chair|chief|emeritus|epidemiologist)\b/i,
+  /\b(professor|lecturer|investigator|head|principal|dean|director|scholar|scientist|vice-?chair|endowed|chair|chief|emeritus|epidemiologist|editor|associate|assistant|offic?io|faap|facp|facs|facog|curriculum|whole|ncert|neet|jee|cbse|icse|sociedad|latinoamericana|infectologia|ambulatory|medicine|critical|care|manual|pedia|pediatrics|american\s+academy)\b/i,
   /\b(publications?|publishers?|publishing|press|house|company|books?|series|guide|clinical|textbook|manual|handbook|principles|practice)\b/i,
   /\b(prentice|hall|mcgraw|pearson|wiley|springer|elsevier|oxford|cambridge|tech-?max|nirali|chand|khanna|laxmi|wolters|kluwer|lippincott|jaypee|thieme|saunders|mosby|cengage|arihant|routledge)\b/i,
   /\b(private|limited|pvt|ltd|inc|corp|llp)\b/i,
@@ -87,7 +87,7 @@ const NON_AUTHOR_PATTERNS = [
   /\b(manufactured|licensed|distribution|pharma|pharmaceutical|premium|prohibited|trade|only|reserved|rights|copyright)\b/i,
   /\b(features|ebook|e-book|e-format|multicolour|diagram|question|paper|solution|solved|sample|activation|code|trial|free|download|app|install|login|signup|register|user|device|windows|android|ios|desktop|library|account)\b/i,
   /\b(price|rs\.?|inr|isbn|issn|code|book\s+code)\b/i,
-  /\b(pune|mumbai|delhi|calcutta|kolkata|chennai|madras|bangalore|bengaluru|hyderabad|ahmedabad|nagpur|nashik|aurangabad|howrah|maharashtra|india|oregon|portland|california|davis|sacramento|philadelphia|baltimore|london|sydney|tokyo|pittsburgh)\b/i,
+  /\b(pune|mumbai|delhi|calcutta|kolkata|chennai|madras|bangalore|bengaluru|hyderabad|ahmedabad|nagpur|nashik|aurangabad|howrah|maharashtra|india|oregon|portland|california|davis|sacramento|philadelphia|baltimore|london|sydney|tokyo|pittsburgh|st\.?\s*louis|missouri|chicago|boston|texas|florida|atlanta|georgia)\b/i,
   /\b(innovation|throughout)\b/i,
   /\d{2,}/
 ];
@@ -123,6 +123,11 @@ function stripDegreesAndTitles(rawText) {
 function toSmartTitleCase(rawTitle) {
   if (!rawTitle) return '';
   const cleaned = rawTitle
+    // Strip bracket/symbol OCR noise from logos (e.g. "[$washin9n@", "ø", "®")
+    .replace(/\[[^\]]*$/g, '')
+    .replace(/[\[\]{}@$%^&*_+=~`|\\<>]/g, ' ')
+    .replace(/\bManual[øo0]\b/gi, 'Manual')
+    .replace(/[ø®™©]/g, '')
     .replace(/\s+/g, ' ')
     .replace(/\s*-\s*/g, '-')
     .trim();
@@ -447,9 +452,10 @@ function extractBookAndAuthorFromMeta(meta) {
     finalAuthors.sort((a, b) => (Math.abs(a.line.y - b.line.y) > 15 ? a.line.y - b.line.y : a.line.x - b.line.x));
   }
 
-  let authorName = finalAuthors.map((a) => a.text).join(', ');
+  // Cap to at most 4 primary authors so filenames remain concise and clean
+  let authorName = finalAuthors.slice(0, 4).map((a) => a.text).join(', ');
   if (!authorName && innerAuthorList.length > 0) {
-    authorName = innerAuthorList.join(', ');
+    authorName = innerAuthorList.slice(0, 4).join(', ');
   }
   if (!authorName) {
     authorName = 'Unknown Author';
