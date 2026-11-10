@@ -14,6 +14,7 @@ const {
   writeOcrJsonl,
   createDefaultPageStates
 } = require('./pdfBuilder');
+const { PDFDocument } = require('pdf-lib');
 const { sanitizeFileName, extractBookMetadata } = require('./extractor');
 const { getLicenseStatus, activateCurrentMachine } = require('./licenseManager');
 
@@ -233,8 +234,113 @@ function saveState() {
   }
 }
 
-function getFileSignature(filePath, stat) {
-  return `${path.basename(filePath).toLowerCase()}|${stat.size}|${Math.floor(stat.mtimeMs)}`;
+function getFileSignature(filePath, stat, relativeSubDir = '') {
+  const prefix = relativeSubDir ? `${relativeSubDir.toLowerCase()}\\` : '';
+  return `${prefix}${path.basename(filePath).toLowerCase()}|${stat.size}|${Math.floor(stat.mtimeMs)}`;
+}
+
+function getJobOutputDir(job) {
+  if (job && job.relativeSubDir && job.relativeSubDir.trim()) {
+    return path.join(config.outputDir, job.relativeSubDir);
+  }
+  return config.outputDir;
+}
+
+/**
+ * If a user pastes a subfolder containing loose scanned page images (.jpg/.jpeg/.png) and no PDF yet,
+ * automatically merges those page images into <FolderName>.pdf so the pipeline processes it seamlessly!
+ */
+let imageFolderConversionBusy = false;
+async function convertImageSubfolderToPdfIfNeeded(dirPath) {
+  if (imageFolderConversionBusy) return;
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    const hasPdf = entries.some((e) => e.isFile() && e.name.toLowerCase().endsWith('.pdf'));
+    if (hasPdf) return;
+
+    const imgFiles = entries
+      .filter((e) => e.isFile() && /\.(jpg|jpeg|png)$/i.test(e.name))
+      .map((e) => e.name)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+    if (imgFiles.length < 1) return;
+
+    imageFolderConversionBusy = true;
+    const folderName = sanitizeFileName(path.basename(dirPath)) || 'Scanned_Book';
+    const outPdfPath = path.join(dirPath, `${folderName}.pdf`);
+    addLog(`Detected folder of ${imgFiles.length} scanned image(s) in "${folderName}" -> Auto-building PDF...`);
+
+    const pdfDoc = await PDFDocument.create();
+    for (const imgName of imgFiles) {
+      const imgPath = path.join(dirPath, imgName);
+      const bytes = await fs.promises.readFile(imgPath);
+      const isPng = imgName.toLowerCase().endsWith('.png');
+      const embedded = isPng ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
+      const page = pdfDoc.addPage([embedded.width, embedded.height]);
+      page.drawImage(embedded, { x: 0, y: 0, width: embedded.width, height: embedded.height });
+    }
+    const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+    await fs.promises.writeFile(outPdfPath, pdfBytes);
+    addLog(`Created "${folderName}.pdf" (${imgFiles.length} pages) from image folder.`);
+  } catch (err) {
+    addLog(`Note: Could not auto-merge images in ${dirPath}: ${err.message}`, 'warn');
+  } finally {
+    imageFolderConversionBusy = false;
+  }
+}
+
+/**
+ * Recursively discovers all .pdf files across config.inputDir and all nested folders & subfolders.
+ */
+function discoverPdfsRecursively(rootDir) {
+  const results = [];
+
+  function walk(currentDir) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch (_) {
+      return;
+    }
+
+    const subDirs = [];
+    const pdfNames = [];
+
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue;
+      if (entry.isDirectory()) {
+        subDirs.push(entry.name);
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.pdf')) {
+        pdfNames.push(entry.name);
+      }
+    }
+
+    if (currentDir !== rootDir && pdfNames.length === 0) {
+      setImmediate(() => convertImageSubfolderToPdfIfNeeded(currentDir));
+    }
+
+    pdfNames.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    for (const pdfName of pdfNames) {
+      const fullPath = path.join(currentDir, pdfName);
+      const relDir = path.relative(rootDir, currentDir);
+      const relativeSubDir = relDir && relDir !== '.' ? relDir : '';
+      const displayFileName = relativeSubDir ? `${relativeSubDir.replace(/\\/g, '/')}/${pdfName}` : pdfName;
+      results.push({
+        fullPath,
+        pdfName,
+        relativeSubDir,
+        displayFileName
+      });
+    }
+
+    subDirs.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    for (const sub of subDirs) {
+      walk(path.join(currentDir, sub));
+    }
+  }
+
+  walk(rootDir);
+  return results;
 }
 
 function isFileReadyForProcessing(filePath) {
@@ -269,22 +375,18 @@ function scanInputDirectory(forceImmediate = false) {
     fs.mkdirSync(config.outputDir, { recursive: true });
   }
 
-  let entries = [];
+  let discoveredPdfs = [];
   try {
-    entries = fs.readdirSync(config.inputDir);
+    discoveredPdfs = discoverPdfsRecursively(config.inputDir);
   } catch (err) {
     addLog(`Cannot read input folder ${config.inputDir}: ${err.message}`, 'error');
     return;
   }
 
-  const pdfFiles = entries
-    .filter((f) => f.toLowerCase().endsWith('.pdf'))
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-
   let enqueuedAny = false;
 
-  for (const fileName of pdfFiles) {
-    const fullPath = path.join(config.inputDir, fileName);
+  for (const item of discoveredPdfs) {
+    const { fullPath, relativeSubDir, displayFileName } = item;
     let stat;
     try {
       stat = fs.statSync(fullPath);
@@ -293,16 +395,16 @@ function scanInputDirectory(forceImmediate = false) {
       continue;
     }
 
-    const sig = getFileSignature(fullPath, stat);
-    if (state.processedSignatures[sig]) {
+    const sig = getFileSignature(fullPath, stat, relativeSubDir);
+    const legacyRootSig = getFileSignature(fullPath, stat, '');
+    if (state.processedSignatures[sig] || (!relativeSubDir && state.processedSignatures[legacyRootSig])) {
       continue;
     }
 
     const alreadyTracked = state.jobs.some(
       (j) =>
         j.signature === sig ||
-        (j.inputPdfPath.toLowerCase() === fullPath.toLowerCase() &&
-          (j.status === 'queued' || j.status === 'processing'))
+        j.inputPdfPath.toLowerCase() === fullPath.toLowerCase()
     );
     if (alreadyTracked) continue;
 
@@ -315,7 +417,8 @@ function scanInputDirectory(forceImmediate = false) {
     const newJob = {
       id: jobId,
       cacheKey,
-      inputFileName: fileName,
+      inputFileName: displayFileName,
+      relativeSubDir: relativeSubDir || '',
       inputPdfPath: fullPath,
       inputSizeBytes: stat.size,
       signature: sig,
@@ -344,12 +447,13 @@ function scanInputDirectory(forceImmediate = false) {
       pagesWithText: 0,
       validationReport: null,
       pageStates: null,
+      uniformRotationV2Applied: true,
       error: null
     };
 
     state.jobs.unshift(newJob);
     enqueuedAny = true;
-    addLog(`Queued scanned PDF: "${fileName}" (${(stat.size / (1024 * 1024)).toFixed(1)} MB)`);
+    addLog(`Queued scanned PDF: "${displayFileName}" (${(stat.size / (1024 * 1024)).toFixed(1)} MB)`);
   }
 
   if (enqueuedAny) {
@@ -385,9 +489,10 @@ async function processNextInQueue() {
   const thumbPath = path.join(THUMBS_DIR, `${job.id}.png`);
 
   try {
+    const jobOutDir = getJobOutputDir(job);
     const result = await processScannedPdf({
       inputPdfPath: job.inputPdfPath,
-      outputDir: config.outputDir,
+      outputDir: jobOutDir,
       tempDir: TEMP_DIR,
       pageThumbsRootDir: PAGE_THUMBS_ROOT,
       thumbPath,
@@ -493,9 +598,9 @@ async function backfillExistingJobsQcData() {
       job.ocrJsonlPath = jsonlPath;
       const pageThumbsDir = path.join(PAGE_THUMBS_ROOT, cacheKey);
 
-      if (fs.existsSync(jsonlPath) && (!job.pageStates || !job.validationReport)) {
+      if (fs.existsSync(jsonlPath) && (!job.pageStates || !job.validationReport || !job.uniformRotationV2Applied)) {
         try {
-          addLog(`Generating fast QC thumbnails, blank detection & crop boxes for "${job.inputFileName}"...`);
+          addLog(`Running Smart Multi-Angle Page Rotation (90°/180°/270°) & Uniform Size Normalization for "${job.inputFileName}"...`);
           const pages = await ensureQcMetricsAndThumbs(job.inputPdfPath, jsonlPath, pageThumbsDir, 6);
           const pageStates = createDefaultPageStates(pages, {
             autoDeleteBlanks: config.autoDeleteBlanks !== false,
@@ -516,11 +621,12 @@ async function backfillExistingJobsQcData() {
             } catch (_) {}
           }
 
-          // Rebuild the output PDF immediately so blank pages are removed, auto-crop is applied, and title/author are updated!
+          // Rebuild the output PDF immediately so rotated pages are physically fixed, all pages are uniform size, and blanks/borders are cleaned!
+          const jobOutDir = getJobOutputDir(job);
           const rebuilt = await rebuildPdfWithQcChanges({
             inputPdfPath: job.inputPdfPath,
             ocrJsonlPath: jsonlPath,
-            outputDir: config.outputDir,
+            outputDir: jobOutDir,
             oldOutputPdfPath: job.outputPdfPath,
             oldTextOutPath: job.textOutPath,
             bookTitle: job.bookTitle,
@@ -535,11 +641,13 @@ async function backfillExistingJobsQcData() {
           job.deletedBlankCount = rebuilt.deletedBlankCount;
           job.croppedPageCount = rebuilt.croppedPageCount;
           job.rotatedPageCount = rebuilt.rotatedPageCount;
+          job.totalWordsEmbedded = rebuilt.totalWordsEmbedded;
           job.validationReport = rebuilt.validationReport;
           job.qcStatus = rebuilt.validationReport.allPassed ? 'auto_verified' : 'needs_review';
+          job.uniformRotationV2Applied = true;
           saveState();
           addLog(
-            `QC Auto-Clean applied to "${job.outputFileName}": ${rebuilt.deletedBlankCount} blank page(s) removed, ${rebuilt.croppedPageCount} pages cropped.`
+            `Uniform Page & Rotation Fix applied to "${job.outputFileName}": ${rebuilt.rotatedPageCount} page(s) rotated/normalized, ${rebuilt.deletedBlankCount} blank(s) removed, ${rebuilt.croppedPageCount} cropped.`
           );
         } catch (err) {
           addLog(`Backfill QC note for "${job.inputFileName}": ${err.message}`, 'warn');
@@ -771,10 +879,11 @@ const server = http.createServer(async (req, res) => {
 
       addLog(`Applying QC changes & rebuilding Searchable PDF for "${newTitle} - ${newAuthor}"...`);
 
+      const jobOutDir = getJobOutputDir(job);
       const rebuilt = await rebuildPdfWithQcChanges({
         inputPdfPath: job.inputPdfPath,
         ocrJsonlPath: jsonlPath,
-        outputDir: config.outputDir,
+        outputDir: jobOutDir,
         oldOutputPdfPath: job.outputPdfPath,
         oldTextOutPath: job.textOutPath,
         bookTitle: newTitle,

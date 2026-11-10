@@ -969,6 +969,7 @@
               <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
                 <span class="pill ${job.status}">${job.status}</span>
                 ${job.qcApproved ? `<span class="pill approved">🏅 Operator QC Approved</span>` : (job.status === 'completed' ? `<span class="pill completed">🛡️ Auto-Validated</span>` : '')}
+                ${job.relativeSubDir ? `<span class="pill queued">📁 ${escapeHtml(job.relativeSubDir)}</span>` : ''}
                 <span style="font-size:0.8rem; color:var(--muted);">Scan File: <strong>${escapeHtml(job.inputFileName)}</strong> (${sizeMb})</span>
               </div>
               <h3>📘 ${escapeHtml(job.bookTitle || 'Pending Extraction...')}</h3>
@@ -1132,14 +1133,16 @@
       grid.innerHTML = filtered.map(p => {
         const idx = p.pageIndex;
         const thumbUrl = `/page-thumb/${encodeURIComponent(qcJob.cacheKey)}/p_${p.pageNumber}.jpg`;
-        const rot = p.rotation || 0;
+        const rot = ((p.rotation || 0) % 360 + 360) % 360;
+        const rotScale = (rot === 90 || rot === 270) ? ' scale(0.74)' : '';
+        const rotLabel = rot === 90 ? '90° CW' : (rot === 270 ? '270° (90° CCW)' : (rot === 180 ? '180°' : ''));
         const cb = p.cropBox || { left: 0, top: 0, right: 0, bottom: 0 };
         const showCrop = p.cropEnabled && !p.deleted;
 
         return `
           <div id="pcard_${idx}" class="p-card ${idx === selectedPageIndex ? 'selected' : ''} ${p.deleted ? 'deleted' : ''} ${p.isBlank ? 'is-blank' : ''}" onclick="selectQcPage(${idx})">
             <div class="p-thumb-wrap">
-              <div class="p-thumb-inner" style="transform: rotate(${rot}deg);">
+              <div class="p-thumb-inner" style="transform: rotate(${rot}deg)${rotScale};">
                 <img loading="lazy" src="${thumbUrl}" alt="Page ${p.pageNumber}" />
                 ${showCrop ? `<div class="crop-guide" style="left:${cb.left}%; top:${cb.top}%; right:${cb.right}%; bottom:${cb.bottom}%;"></div>` : ''}
               </div>
@@ -1147,7 +1150,7 @@
             </div>
             <div class="p-card-footer">
               <strong>P.${p.pageNumber}</strong>
-              <span>${p.isBlank ? '⚠️ Blank' : `${p.wordCount || 0}w`}${rot ? ` · ${rot}°` : ''}</span>
+              <span>${p.isBlank ? '⚠️ Blank' : `${p.wordCount || 0}w`}${rot ? ` · <strong style="color:#fbbf24;">↻ ${rotLabel}</strong>` : ''}</span>
             </div>
             <div class="p-quick-btns" onclick="event.stopPropagation();">
               <button title="Rotate Left 90°" onclick="quickRotatePage(${idx}, -90)">↶</button>
@@ -1171,17 +1174,20 @@
 
       document.getElementById('inspPageTitle').textContent = `🔎 Page ${p.pageNumber} of ${qcPages.length}`;
       const badge = document.getElementById('inspPageBadge');
+      const curRot = ((p.rotation || 0) % 360 + 360) % 360;
+      const inspScale = (curRot === 90 || curRot === 270) ? ' scale(0.75)' : '';
+      const curRotDesc = curRot === 90 ? ' · ↻ Rotated 90° CW' : (curRot === 270 ? ' · ↻ Rotated 270° (90° CCW)' : (curRot === 180 ? ' · ↻ Rotated 180°' : ''));
       if (p.deleted) {
         badge.className = 'pill failed';
         badge.textContent = p.isBlank ? 'Blank (Deleted)' : 'Deleted';
       } else {
         badge.className = 'pill completed';
-        badge.textContent = `Active (${p.wordCount || 0} words)`;
+        badge.textContent = `Active (${p.wordCount || 0} words${curRotDesc})`;
       }
 
       document.getElementById('inspDeleteBtn').textContent = p.deleted ? '♻️ Restore' : '🗑️ Delete';
       document.getElementById('inspImg').src = `/page-thumb/${encodeURIComponent(qcJob.cacheKey)}/p_${p.pageNumber}.jpg`;
-      document.getElementById('inspImgWrap').style.transform = `rotate(${p.rotation || 0}deg)`;
+      document.getElementById('inspImgWrap').style.transform = `rotate(${curRot}deg)${inspScale}`;
 
       const cb = p.cropBox || { left: 2, top: 2, right: 2, bottom: 2 };
       document.getElementById('inspCropEnabled').checked = !!p.cropEnabled;

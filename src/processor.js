@@ -151,8 +151,32 @@ function runQcFastScan({ pdfPath, outMetricsJsonPath, pageThumbsDir, concurrency
   });
 }
 
+function runSuspectPagesRotationScan(pdfPath, indicesArr, concurrency = 4) {
+  return new Promise((resolve) => {
+    if (!indicesArr || indicesArr.length === 0) return resolve([]);
+    execFile(
+      WIN_OCR_EXE,
+      ['pages', pdfPath, indicesArr.join(','), String(concurrency)],
+      { maxBuffer: 50 * 1024 * 1024, windowsHide: true },
+      (err, stdout) => {
+        if (err || !stdout) return resolve([]);
+        const updated = [];
+        for (const line of stdout.split(/\r?\n/)) {
+          const t = line.trim();
+          if (!t.startsWith('{')) continue;
+          try {
+            updated.push(JSON.parse(t));
+          } catch (_) {}
+        }
+        resolve(updated);
+      }
+    );
+  });
+}
+
 /**
- * Ensures an existing cached JSONL file has pixel QC metrics (isBlank, cropBox, inkRatio) and page thumbnails
+ * Ensures an existing cached JSONL file has pixel QC metrics (isBlank, cropBox, inkRatio),
+ * multi-angle rotation detection (90/180/270 deg), and page thumbnails
  */
 async function ensureQcMetricsAndThumbs(inputPdfPath, jsonlPath, pageThumbsDir, concurrency = 6) {
   const pages = await readOcrJsonl(jsonlPath);
@@ -162,42 +186,73 @@ async function ensureQcMetricsAndThumbs(inputPdfPath, jsonlPath, pageThumbsDir, 
   const lastPageThumb = path.join(pageThumbsDir, `p_${pages.length}.jpg`);
   const hasMetrics = pages[0] && typeof pages[0].isBlank === 'boolean' && pages[0].cropBox;
   const hasThumbs = fs.existsSync(firstPageThumb) && fs.existsSync(lastPageThumb);
+  const hasRotationV2 = pages[0] && pages[0].rotationCheckedV2 === true;
 
-  if (hasMetrics && hasThumbs) {
-    return pages;
-  }
-
-  const metricsPath = jsonlPath + '.metrics.json';
-  try {
-    await runQcFastScan({
-      pdfPath: inputPdfPath,
-      outMetricsJsonPath: metricsPath,
-      pageThumbsDir,
-      concurrency
-    });
-    if (fs.existsSync(metricsPath)) {
-      const metricsArr = JSON.parse(fs.readFileSync(metricsPath, 'utf8'));
-      for (const m of metricsArr) {
-        const p = pages[m.pageIndex];
-        if (!p) continue;
-        const wordCount = Array.isArray(p.lines)
-          ? p.lines.reduce((acc, l) => acc + ((l.words && l.words.length) || 0), 0)
-          : 0;
-        p.wordCount = wordCount;
-        p.inkRatio = m.inkRatio;
-        p.hasDarkBorder = m.hasDarkBorder;
-        p.isBlank = m.isBlank && wordCount <= 2;
-        p.cropBox = m.cropBox;
-        p.detectedRotation = p.detectedRotation || 0;
-        p.confidence = p.isBlank ? 100 : 99.1;
+  if (!hasMetrics || !hasThumbs) {
+    const metricsPath = jsonlPath + '.metrics.json';
+    try {
+      await runQcFastScan({
+        pdfPath: inputPdfPath,
+        outMetricsJsonPath: metricsPath,
+        pageThumbsDir,
+        concurrency
+      });
+      if (fs.existsSync(metricsPath)) {
+        const metricsArr = JSON.parse(fs.readFileSync(metricsPath, 'utf8'));
+        for (const m of metricsArr) {
+          const p = pages[m.pageIndex];
+          if (!p) continue;
+          const wordCount = Array.isArray(p.lines)
+            ? p.lines.reduce((acc, l) => acc + ((l.words && l.words.length) || 0), 0)
+            : 0;
+          p.wordCount = wordCount;
+          p.inkRatio = m.inkRatio;
+          p.hasDarkBorder = m.hasDarkBorder;
+          p.isBlank = m.isBlank && wordCount <= 2;
+          p.cropBox = m.cropBox;
+          p.detectedRotation = p.detectedRotation || 0;
+          p.confidence = p.isBlank ? 100 : 99.1;
+        }
       }
-      await writeOcrJsonl(jsonlPath, pages);
-    }
-  } finally {
-    if (fs.existsSync(metricsPath)) {
-      try { fs.unlinkSync(metricsPath); } catch (_) {}
+    } finally {
+      if (fs.existsSync(metricsPath)) {
+        try { fs.unlinkSync(metricsPath); } catch (_) {}
+      }
     }
   }
+
+  if (!hasRotationV2) {
+    // Identify suspect sideways/upside-down pages (landscape pages or high-ink low-word pages)
+    const suspectIndices = [];
+    for (let i = 0; i < pages.length; i++) {
+      const p = pages[i];
+      if (!p || p.isBlank) continue;
+      const pw = p.pdfWidth || 500;
+      const ph = p.pdfHeight || 700;
+      const wc = p.wordCount || 0;
+      const ink = p.inkRatio || 0;
+      if ((pw > ph * 1.04 && wc < 95) || (ink > 0.012 && wc < 35 && i > 0)) {
+        suspectIndices.push(i);
+      }
+    }
+
+    if (suspectIndices.length > 0) {
+      const updatedPages = await runSuspectPagesRotationScan(inputPdfPath, suspectIndices, 4);
+      for (const up of updatedPages) {
+        if (up && typeof up.pageIndex === 'number' && pages[up.pageIndex]) {
+          pages[up.pageIndex] = up;
+        }
+      }
+    }
+
+    if (pages[0]) {
+      pages[0].rotationCheckedV2 = true;
+    }
+    await writeOcrJsonl(jsonlPath, pages);
+  } else if (!hasMetrics || !hasThumbs) {
+    await writeOcrJsonl(jsonlPath, pages);
+  }
+
   return pages;
 }
 

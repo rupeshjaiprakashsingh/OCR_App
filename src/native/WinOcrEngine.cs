@@ -32,10 +32,21 @@ namespace OcrAppNative
         public double InkRatio;
         public bool IsBlank;
         public bool HasDarkBorder;
+        public bool VerticalLineBias;
+        public bool IsLinedNotePage;
         public double CropLeftPct;
         public double CropTopPct;
         public double CropRightPct;
         public double CropBottomPct;
+    }
+
+    class OcrOrientationStats
+    {
+        public int TotalWords;
+        public int NaturalWords;
+        public int LongNaturalWords;
+        public int StopWords;
+        public int Score;
     }
 
     class Program
@@ -110,6 +121,71 @@ namespace OcrAppNative
                 .Replace("\uFB04", "ffl");
         }
 
+        static readonly HashSet<string> COMMON_BOOK_WORDS = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "the","and","for","with","from","that","this","are","was","were","have","has","not","but",
+            "what","all","can","which","their","will","each","about","into","than","other","over","also",
+            "after","between","during","under","within","without","where","when","there","these","those",
+            "table","tables","figure","chapter","section","algorithm","treatment","dose","dosage","drugs",
+            "drug","disease","diseases","infection","infections","therapy","system","systems","electric",
+            "electrical","voltage","current","circuit","frequency","microwave","biology","animal","animals",
+            "plant","cell","blood","pressure","patient","patients","clinical","management","syndrome",
+            "method","methods","continued","resistance","welding","species","oral","daily","human","hours"
+        };
+
+        static OcrOrientationStats ScoreOcrOrientation(OcrResult res)
+        {
+            OcrOrientationStats st = new OcrOrientationStats();
+            if (res == null || res.Lines == null) return st;
+
+            foreach (var ln in res.Lines)
+            {
+                if (ln.Words == null) continue;
+                foreach (var w in ln.Words)
+                {
+                    string raw = (w.Text ?? "").Trim();
+                    if (raw.Length == 0) continue;
+                    st.TotalWords++;
+
+                    string clean = Regex.Replace(raw, @"^[^A-Za-z0-9]+|[^A-Za-z0-9]+$", "");
+                    if (clean.Length < 2) continue;
+
+                    if (COMMON_BOOK_WORDS.Contains(clean))
+                    {
+                        st.StopWords++;
+                        st.NaturalWords++;
+                        if (clean.Length >= 5) st.LongNaturalWords++;
+                        continue;
+                    }
+
+                    bool hasVowel = false;
+                    bool hasConsonant = false;
+                    int alphaCount = 0;
+                    foreach (char c in clean)
+                    {
+                        if (char.IsLetter(c))
+                        {
+                            alphaCount++;
+                            char lower = char.ToLowerInvariant(c);
+                            if (lower == 'a' || lower == 'e' || lower == 'i' || lower == 'o' || lower == 'u' || lower == 'y')
+                                hasVowel = true;
+                            else
+                                hasConsonant = true;
+                        }
+                    }
+
+                    if (alphaCount >= 3 && hasVowel && hasConsonant && alphaCount >= clean.Length - 1)
+                    {
+                        st.NaturalWords++;
+                        if (alphaCount >= 5) st.LongNaturalWords++;
+                    }
+                }
+            }
+
+            st.Score = st.NaturalWords * 2 + st.LongNaturalWords * 3 + st.StopWords * 6;
+            return st;
+        }
+
         static PixelMetrics AnalyzeBitmapPixels(byte[] bgra, int width, int height, int pageIndex)
         {
             PixelMetrics m = new PixelMetrics();
@@ -121,7 +197,6 @@ namespace OcrAppNative
 
             // 1. Check outer 3% border for black scanner edge shadows
             int edgeX = Math.Max(2, (int)(width * 0.03));
-            int edgeY = Math.Max(2, (int)(height * 0.03));
             int borderDark = 0, borderTotal = 0;
 
             for (int y = 0; y < height; y += 4)
@@ -144,19 +219,27 @@ namespace OcrAppNative
             }
             m.HasDarkBorder = borderTotal > 0 && ((double)borderDark / borderTotal) > 0.04;
 
-            // 2. Analyze inner page area (skipping outer 5% scanner edge zone) for true ink density & content bounds
+            // 2. Analyze inner page area (skipping outer 5% scanner edge zone) for true ink density, line projection & content bounds
             int marginX = (int)(width * 0.055);
             int marginY = (int)(height * 0.045);
             int darkCount = 0;
             int totalInner = 0;
             int minX = width, minY = height, maxX = 0, maxY = 0;
 
-            for (int y = marginY; y < height - marginY; y += 2)
+            int innerW = Math.Max(1, (width - 2 * marginX + 1) / 2);
+            int innerH = Math.Max(1, (height - 2 * marginY + 1) / 2);
+            int[] rowCounts = new int[innerH];
+            int[] colCounts = new int[innerW];
+            int fullRuleRows = 0;
+
+            int rIdx = 0;
+            for (int y = marginY; y < height - marginY; y += 2, rIdx++)
             {
                 int rowStart = y * width * 4;
                 int rowDark = 0;
                 int rowMinX = width, rowMaxX = 0;
-                for (int x = marginX; x < width - marginX; x += 2)
+                int cIdx = 0;
+                for (int x = marginX; x < width - marginX; x += 2, cIdx++)
                 {
                     int idx = rowStart + x * 4;
                     int lum = (bgra[idx + 2] * 77 + bgra[idx + 1] * 150 + bgra[idx] * 29) >> 8;
@@ -165,10 +248,13 @@ namespace OcrAppNative
                     {
                         darkCount++;
                         rowDark++;
+                        if (rIdx < innerH) rowCounts[rIdx]++;
+                        if (cIdx < innerW) colCounts[cIdx]++;
                         if (x < rowMinX) rowMinX = x;
                         if (x > rowMaxX) rowMaxX = x;
                     }
                 }
+                if (rowDark > innerW * 0.65) fullRuleRows++;
                 if (rowDark >= 3)
                 {
                     if (y < minY) minY = y;
@@ -178,6 +264,23 @@ namespace OcrAppNative
                 }
             }
 
+            // Compute row vs column stripe modulation to detect vertical text lines (90 / 270 deg)
+            double rowMod = 0;
+            for (int i = 2; i < innerH; i++)
+            {
+                rowMod += Math.Abs(rowCounts[i] - rowCounts[i - 2]);
+            }
+            rowMod = innerH > 2 ? (rowMod / (innerH - 2)) / Math.Max(1.0, innerW) : 0;
+
+            double colMod = 0;
+            for (int i = 2; i < innerW; i++)
+            {
+                colMod += Math.Abs(colCounts[i] - colCounts[i - 2]);
+            }
+            colMod = innerW > 2 ? (colMod / (innerW - 2)) / Math.Max(1.0, innerH) : 0;
+
+            m.VerticalLineBias = colMod > rowMod * 1.05;
+            m.IsLinedNotePage = fullRuleRows >= 12 && !m.VerticalLineBias;
             m.InkRatio = totalInner > 0 ? (double)darkCount / totalInner : 0.0;
             m.IsBlank = m.InkRatio < 0.0022;
 
@@ -274,23 +377,20 @@ namespace OcrAppNative
                     result = await WaitOp(ocr.RecognizeAsync(bitmap));
                 }
 
-                int rawWordCount = 0;
-                int validAlphaWords = 0;
-                if (result != null && result.Lines != null)
-                {
-                    foreach (var ln in result.Lines)
-                    {
-                        if (ln.Words == null) continue;
-                        foreach (var w in ln.Words)
-                        {
-                            rawWordCount++;
-                            if (Regex.IsMatch(w.Text ?? "", "[A-Za-z0-9]{2,}")) validAlphaWords++;
-                        }
-                    }
-                }
+                OcrOrientationStats stats0 = ScoreOcrOrientation(result);
+                int rawWordCount = stats0.TotalWords;
+                int validAlphaWords = stats0.NaturalWords;
 
-                // Auto-Orientation Recovery: If page has high ink density (>0.8%) but almost no readable horizontal words, test 90/270/180 rotation
-                if (!metrics.IsBlank && metrics.InkRatio > 0.008 && validAlphaWords < 3)
+                bool isLandscapePage = pdfW > pdfH * 1.04;
+                bool hasVerticalLines = metrics.VerticalLineBias;
+                bool lowScoreForInk = !metrics.IsLinedNotePage && (
+                    (metrics.InkRatio > 0.015 && stats0.Score < 95) ||
+                    (metrics.InkRatio > 0.006 && stats0.Score < 35) ||
+                    (stats0.TotalWords >= 5 && stats0.NaturalWords * 2 < stats0.TotalWords)
+                );
+
+                // Multi-Signal Auto-Orientation & Exact Angle (90 / 270 / 180) Detector
+                if (!metrics.IsBlank && metrics.InkRatio > 0.004 && (isLandscapePage || hasVerticalLines || lowScoreForInk))
                 {
                     BitmapRotation[] candidateRots = new BitmapRotation[] {
                         BitmapRotation.Clockwise90Degrees,
@@ -298,6 +398,15 @@ namespace OcrAppNative
                         BitmapRotation.Clockwise180Degrees
                     };
                     int[] degs = new int[] { 90, 270, 180 };
+
+                    int bestAngle = 0;
+                    int bestScore = stats0.Score;
+                    OcrResult bestRes = result;
+                    OcrOrientationStats bestStats = stats0;
+
+                    int score90 = 0, score270 = 0;
+                    OcrResult res90 = null, res270 = null;
+                    OcrOrientationStats st90 = null, st270 = null;
 
                     for (int rIdx = 0; rIdx < candidateRots.Length; rIdx++)
                     {
@@ -312,31 +421,71 @@ namespace OcrAppNative
                                 ColorManagementMode.DoNotColorManage)))
                             {
                                 OcrResult rotRes = await WaitOp(ocr.RecognizeAsync(rotBmp));
-                                int rotValid = 0;
-                                if (rotRes != null && rotRes.Lines != null)
+                                OcrOrientationStats rotStats = ScoreOcrOrientation(rotRes);
+
+                                if (degs[rIdx] == 90) { score90 = rotStats.Score; res90 = rotRes; st90 = rotStats; }
+                                if (degs[rIdx] == 270) { score270 = rotStats.Score; res270 = rotRes; st270 = rotStats; }
+
+                                if (rotStats.Score > bestScore * 1.20 && rotStats.Score >= bestScore + 10)
                                 {
-                                    foreach (var ln in rotRes.Lines)
-                                    {
-                                        if (ln.Words == null) continue;
-                                        foreach (var w in ln.Words)
-                                        {
-                                            if (Regex.IsMatch(w.Text ?? "", "[A-Za-z0-9]{2,}")) rotValid++;
-                                        }
-                                    }
-                                }
-                                if (rotValid > validAlphaWords + 5)
-                                {
-                                    validAlphaWords = rotValid;
-                                    result = rotRes;
-                                    detectedRotation = degs[rIdx];
-                                    if (detectedRotation == 90 || detectedRotation == 270)
-                                    {
-                                        uint tmp = imgW; imgW = imgH; imgH = tmp;
-                                    }
+                                    bestScore = rotStats.Score;
+                                    bestAngle = degs[rIdx];
+                                    bestRes = rotRes;
+                                    bestStats = rotStats;
                                 }
                             }
                         }
                         catch { }
+                    }
+
+                    // Special Case: Landscape page in a Portrait book where main heading/running header is on 90 or 270 (e.g. 1.pdf Page 199)
+                    if (bestAngle == 0 && isLandscapePage)
+                    {
+                        if (score270 >= 45 && score270 > score90 * 2 && st270 != null && st270.StopWords >= 2)
+                        {
+                            bestAngle = 270;
+                            bestRes = res270;
+                            bestStats = st270;
+                        }
+                        else if (score90 >= 45 && score90 > score270 * 2 && st90 != null && st90.StopWords >= 2)
+                        {
+                            bestAngle = 90;
+                            bestRes = res90;
+                            bestStats = st90;
+                        }
+                    }
+
+                    if (bestAngle != 0 && bestRes != null)
+                    {
+                        detectedRotation = bestAngle;
+                        result = bestRes;
+                        rawWordCount = bestStats.TotalWords;
+                        validAlphaWords = bestStats.NaturalWords;
+
+                        double oldL = metrics.CropLeftPct, oldT = metrics.CropTopPct, oldR = metrics.CropRightPct, oldB = metrics.CropBottomPct;
+                        if (detectedRotation == 90)
+                        {
+                            uint tmp = imgW; imgW = imgH; imgH = tmp;
+                            metrics.CropLeftPct = oldB;
+                            metrics.CropTopPct = oldL;
+                            metrics.CropRightPct = oldT;
+                            metrics.CropBottomPct = oldR;
+                        }
+                        else if (detectedRotation == 270)
+                        {
+                            uint tmp = imgW; imgW = imgH; imgH = tmp;
+                            metrics.CropLeftPct = oldT;
+                            metrics.CropTopPct = oldR;
+                            metrics.CropRightPct = oldB;
+                            metrics.CropBottomPct = oldL;
+                        }
+                        else if (detectedRotation == 180)
+                        {
+                            metrics.CropLeftPct = oldR;
+                            metrics.CropTopPct = oldB;
+                            metrics.CropRightPct = oldL;
+                            metrics.CropBottomPct = oldT;
+                        }
                     }
                 }
 
@@ -722,6 +871,69 @@ namespace OcrAppNative
             Console.WriteLine("QC_SCAN_DONE:" + totalPages);
         }
 
+        /**
+         * Re-runs full multi-angle OCR + rotation detection on a comma-separated list of 0-based page indices
+         * and outputs their updated JSONL lines to stdout (used to upgrade rotation detection on already-cached books in ~2s).
+         */
+        static async Task RunPagesListAsync(string pdfPath, string csvIndices, int concurrency)
+        {
+            string fullPdfPath = Path.GetFullPath(pdfPath);
+            StorageFile mainFile = await WaitOp(StorageFile.GetFileFromPathAsync(fullPdfPath));
+            PdfDocument mainPdf = await WaitOp(PdfDocument.LoadFromFileAsync(mainFile));
+            int totalPages = (int)mainPdf.PageCount;
+
+            string[] parts = (csvIndices ?? "").Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            List<int> pageList = new List<int>();
+            foreach (string p in parts)
+            {
+                int idx;
+                if (int.TryParse(p.Trim(), out idx) && idx >= 0 && idx < totalPages)
+                {
+                    pageList.Add(idx);
+                }
+            }
+            if (pageList.Count == 0) return;
+
+            string[] outLines = new string[pageList.Count];
+            int nextItem = 0;
+            int workers = Math.Max(1, Math.Min(concurrency, pageList.Count));
+            Task[] workerTasks = new Task[workers];
+
+            for (int w = 0; w < workers; w++)
+            {
+                workerTasks[w] = Task.Run(async () =>
+                {
+                    StorageFile wFile = await WaitOp(StorageFile.GetFileFromPathAsync(fullPdfPath));
+                    PdfDocument wPdf = await WaitOp(PdfDocument.LoadFromFileAsync(wFile));
+                    OcrEngine wOcr = OcrEngine.TryCreateFromUserProfileLanguages();
+                    if (wOcr == null)
+                    {
+                        wOcr = OcrEngine.TryCreateFromLanguage(new Windows.Globalization.Language("en-US"));
+                    }
+
+                    while (true)
+                    {
+                        int itemIdx = Interlocked.Increment(ref nextItem) - 1;
+                        if (itemIdx >= pageList.Count) break;
+                        int pageIdx = pageList[itemIdx];
+                        try
+                        {
+                            PageOcrData d = await OcrSinglePageAsync(wPdf, wOcr, (uint)pageIdx, 1.5, null);
+                            outLines[itemIdx] = d.JsonLine;
+                        }
+                        catch { }
+                    }
+                });
+            }
+
+            await Task.WhenAll(workerTasks);
+            Console.OutputEncoding = Encoding.UTF8;
+            foreach (string line in outLines)
+            {
+                if (!string.IsNullOrEmpty(line)) Console.WriteLine(line);
+            }
+        }
+
         static async Task RunThumbAsync(string pdfPath, string outPngPath)
         {
             string fullPdfPath = Path.GetFullPath(pdfPath);
@@ -794,6 +1006,13 @@ namespace OcrAppNative
                     string pageThumbsDir = args[3];
                     int concurrency = (args.Length >= 5) ? int.Parse(args[4]) : 6;
                     RunQcFastScanAsync(pdfPath, outMetricsJsonPath, pageThumbsDir, concurrency).GetAwaiter().GetResult();
+                }
+                else if (mode == "pages")
+                {
+                    string pdfPath = args[1];
+                    string csvIndices = args[2];
+                    int concurrency = (args.Length >= 4) ? int.Parse(args[3]) : 4;
+                    RunPagesListAsync(pdfPath, csvIndices, concurrency).GetAwaiter().GetResult();
                 }
                 else if (mode == "thumb")
                 {
