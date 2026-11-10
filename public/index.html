@@ -326,6 +326,9 @@
         <p>24/7 Local Pipeline: Auto Blank Removal · Smart Border Cropping · Auto Rotation · 100% Searchable OCR · Page 1 Book & Author Renaming</p>
       </div>
       <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <button id="licenseBadgeBtn" class="secondary sm" onclick="openLicenseModal(true)" title="View Hardware Machine License">
+          🔒 Checking License...
+        </button>
         <div id="watcherBadge" class="status-badge">
           <span class="pulse"></span>
           <span id="watcherText">24/7 Watcher Active</span>
@@ -599,11 +602,204 @@
     </div>
   </div>
 
+  <!-- ========================================================================
+       HARDWARE-LOCKED MACHINE LICENSING & ADMIN AUTHORIZATION MODAL
+       ======================================================================== -->
+  <div id="licenseModal" style="display:none; position:fixed; inset:0; z-index:2000; background:rgba(7,11,22,0.94); backdrop-filter:blur(8px); align-items:center; justify-content:center; padding:20px;">
+    <div style="background:#151e32; border:1px solid #334155; border-radius:16px; max-width:560px; width:100%; padding:28px; box-shadow:0 24px 60px rgba(0,0,0,0.65);">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
+        <div>
+          <span id="licModalStatusPill" class="pill failed" style="margin-bottom:8px; display:inline-block;">🔒 HARDWARE LOCK ACTIVE</span>
+          <h2 style="font-size:1.28rem; color:#f8fafc;">System Authorization & Hardware Lock</h2>
+          <p style="font-size:0.84rem; color:#94a3b8; margin-top:4px;">
+            This software is hardware-locked to prevent unauthorized copying to other computers.
+          </p>
+        </div>
+        <button id="licCloseBtn" class="secondary sm" style="display:none;" onclick="closeLicenseModal()">✕ Close</button>
+      </div>
+
+      <div style="background:#0b0f19; border:1px solid #1e293b; border-radius:10px; padding:12px 16px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-size:0.72rem; color:#94a3b8; text-transform:uppercase; font-weight:700;">This Laptop's Unique Hardware Machine ID</div>
+          <div id="licMachineIdDisplay" style="font-family:Consolas, monospace; font-size:1.15rem; font-weight:800; color:#38bdf8; letter-spacing:0.05em; margin-top:2px;">RUP-XXXX-XXXX-XXXX</div>
+        </div>
+        <button class="secondary sm" onclick="copyMachineId()">📋 Copy ID</button>
+      </div>
+
+      <div id="licCurrentDetails" style="display:none; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:12px 16px; margin-bottom:16px; font-size:0.84rem;">
+        <div style="color:#34d399; font-weight:700; margin-bottom:4px;">✅ Authorized & Activated Machine</div>
+        <div id="licClientSummary" style="color:#e2e8f0;"></div>
+      </div>
+
+      <div class="filter-tabs" style="margin-bottom:16px; width:100%; display:flex;">
+        <button id="licTabAdmin" class="filter-tab active" style="flex:1; padding:8px;" onclick="switchLicTab('admin')">🔐 Admin Setup (Rupesh Only)</button>
+        <button id="licTabKey" class="filter-tab" style="flex:1; padding:8px;" onclick="switchLicTab('key')">🔑 Enter Client License Key</button>
+      </div>
+
+      <!-- Option 1: Admin Direct Activation -->
+      <div id="licPanelAdmin">
+        <div class="form-row">
+          <label>Client / Scanning Team Name</label>
+          <input type="text" id="licClientNameInput" placeholder="e.g. Client Scanning Team - Laptop 1" value="Authorized Client Laptop" />
+        </div>
+        <div class="form-row">
+          <label>License Validity Period</label>
+          <select id="licValiditySelect" style="width:100%; background:#0b0f19; border:1px solid var(--border); color:var(--text); padding:9px 12px; border-radius:8px; font-size:0.86rem;">
+            <option value="LIFETIME">Lifetime License (Never Expires)</option>
+            <option value="365">1 Year Subscription (365 Days)</option>
+            <option value="90">3 Months Subscription (90 Days)</option>
+            <option value="30">30-Day Client Trial / Demo</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Rupesh Master Admin Password</label>
+          <input type="password" id="licAdminPassInput" placeholder="Enter Master Admin Password to unlock this PC..." onkeydown="if(event.key==='Enter') activateWithAdminPassword()" />
+        </div>
+        <button class="success" style="width:100%; justify-content:center; padding:11px; margin-top:6px;" onclick="activateWithAdminPassword()">
+          🔓 Authorize & Activate This Laptop Now
+        </button>
+      </div>
+
+      <!-- Option 2: Remote License Key Activation -->
+      <div id="licPanelKey" style="display:none;">
+        <div class="form-row">
+          <label>Client / Scanning Team Name</label>
+          <input type="text" id="licKeyClientNameInput" placeholder="e.g. Scanning Team Laptop" value="Authorized Client Laptop" />
+        </div>
+        <div class="form-row">
+          <label>Hardware-Locked License Key (Generated for this Machine ID)</label>
+          <input type="text" id="licKeyInput" placeholder="LIC-XXXXXXXXXXXX-LIFETIME-XXXXXXXXXXXX" style="font-family:Consolas, monospace;" onkeydown="if(event.key==='Enter') activateWithLicenseKey()" />
+        </div>
+        <button class="success" style="width:100%; justify-content:center; padding:11px; margin-top:6px;" onclick="activateWithLicenseKey()">
+          🔑 Verify & Activate License Key
+        </button>
+      </div>
+
+      <div id="licErrorBox" style="color:#f87171; font-size:0.83rem; margin-top:12px; min-height:20px; text-align:center;"></div>
+    </div>
+  </div>
+
   <script>
     let currentConfig = {};
+    let currentLicense = {};
     let configInitialized = false;
     let lastJobsData = [];
     let mainStatusFilter = 'all';
+
+    function updateLicenseUi(lic) {
+      currentLicense = lic || {};
+      const btn = document.getElementById('licenseBadgeBtn');
+      const modal = document.getElementById('licenseModal');
+      const closeBtn = document.getElementById('licCloseBtn');
+      const pill = document.getElementById('licModalStatusPill');
+      const details = document.getElementById('licCurrentDetails');
+      const summary = document.getElementById('licClientSummary');
+      document.getElementById('licMachineIdDisplay').textContent = currentLicense.machineId || 'RUP-XXXX-XXXX-XXXX';
+
+      if (currentLicense.licensed) {
+        btn.innerHTML = `🔒 Licensed: ${escapeHtml(currentLicense.clientName || 'Authorized')}`;
+        btn.style.borderColor = 'rgba(16,185,129,0.4)';
+        btn.style.color = '#34d399';
+        pill.className = 'pill completed';
+        pill.textContent = '✅ HARDWARE LICENSE ACTIVE';
+        closeBtn.style.display = 'inline-flex';
+        details.style.display = 'block';
+        summary.innerHTML = `Licensed to: <strong>${escapeHtml(currentLicense.clientName)}</strong><br/>Validity: <strong>${escapeHtml(currentLicense.expiresAt)}</strong> · Host: <strong>${escapeHtml(currentLicense.hostname || '')}</strong>`;
+        if (!modal.dataset.manualOpen) {
+          modal.style.display = 'none';
+        }
+      } else {
+        btn.innerHTML = `🔒 UNLICENSED (Click to Activate)`;
+        btn.style.borderColor = 'rgba(239,68,68,0.5)';
+        btn.style.color = '#f87171';
+        pill.className = 'pill failed';
+        pill.textContent = '🔒 ACTIVATION REQUIRED FOR THIS LAPTOP';
+        closeBtn.style.display = 'none';
+        details.style.display = 'none';
+        modal.style.display = 'flex';
+        document.getElementById('licErrorBox').textContent = currentLicense.reason || '';
+      }
+    }
+
+    function openLicenseModal(manual = true) {
+      const modal = document.getElementById('licenseModal');
+      if (manual) modal.dataset.manualOpen = '1';
+      modal.style.display = 'flex';
+    }
+
+    function closeLicenseModal() {
+      if (!currentLicense.licensed) return;
+      const modal = document.getElementById('licenseModal');
+      delete modal.dataset.manualOpen;
+      modal.style.display = 'none';
+    }
+
+    function switchLicTab(tab) {
+      document.getElementById('licTabAdmin').classList.toggle('active', tab === 'admin');
+      document.getElementById('licTabKey').classList.toggle('active', tab === 'key');
+      document.getElementById('licPanelAdmin').style.display = tab === 'admin' ? 'block' : 'none';
+      document.getElementById('licPanelKey').style.display = tab === 'key' ? 'block' : 'none';
+      document.getElementById('licErrorBox').textContent = '';
+    }
+
+    function copyMachineId() {
+      const mid = currentLicense.machineId || document.getElementById('licMachineIdDisplay').textContent;
+      navigator.clipboard.writeText(mid);
+      document.getElementById('licErrorBox').style.color = '#34d399';
+      document.getElementById('licErrorBox').textContent = `Copied Machine ID (${mid}) to clipboard!`;
+    }
+
+    async function activateWithAdminPassword() {
+      const clientName = document.getElementById('licClientNameInput').value.trim();
+      const validityDays = document.getElementById('licValiditySelect').value;
+      const adminPassword = document.getElementById('licAdminPassInput').value;
+      const errBox = document.getElementById('licErrorBox');
+      errBox.style.color = '#94a3b8';
+      errBox.textContent = 'Verifying Admin Password & locking license to hardware...';
+
+      const res = await fetch('/api/activate-license', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientName, validityDays, adminPassword })
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        errBox.style.color = '#f87171';
+        errBox.textContent = data.error || 'Activation failed';
+        return;
+      }
+      document.getElementById('licAdminPassInput').value = '';
+      errBox.style.color = '#34d399';
+      errBox.textContent = '✅ Laptop Activated Successfully!';
+      delete document.getElementById('licenseModal').dataset.manualOpen;
+      updateLicenseUi(data.license);
+      fetchStatus();
+    }
+
+    async function activateWithLicenseKey() {
+      const clientName = document.getElementById('licKeyClientNameInput').value.trim();
+      const licenseKey = document.getElementById('licKeyInput').value.trim();
+      const errBox = document.getElementById('licErrorBox');
+      errBox.style.color = '#94a3b8';
+      errBox.textContent = 'Verifying Hardware License Key...';
+
+      const res = await fetch('/api/activate-license', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientName, licenseKey })
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        errBox.style.color = '#f87171';
+        errBox.textContent = data.error || 'Invalid license key';
+        return;
+      }
+      errBox.style.color = '#34d399';
+      errBox.textContent = '✅ License Key Activated Successfully!';
+      delete document.getElementById('licenseModal').dataset.manualOpen;
+      updateLicenseUi(data.license);
+      fetchStatus();
+    }
 
     function setMainStatusFilter(st) {
       mainStatusFilter = st;
@@ -632,6 +828,9 @@
         const res = await fetch('/api/status');
         const data = await res.json();
         currentConfig = data.config || {};
+        if (data.license) {
+          updateLicenseUi(data.license);
+        }
 
         if (!configInitialized) {
           document.getElementById('inputDirInput').value = currentConfig.inputDir || '';

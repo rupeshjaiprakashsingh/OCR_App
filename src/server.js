@@ -15,6 +15,7 @@ const {
   createDefaultPageStates
 } = require('./pdfBuilder');
 const { sanitizeFileName, extractBookMetadata } = require('./extractor');
+const { getLicenseStatus, activateCurrentMachine } = require('./licenseManager');
 
 const ROOT_DIR = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT_DIR, 'data');
@@ -257,6 +258,8 @@ function isFileReadyForProcessing(filePath) {
 }
 
 function scanInputDirectory(forceImmediate = false) {
+  const lic = getLicenseStatus();
+  if (!lic.licensed) return;
   if (!config.watcherEnabled && !forceImmediate) return;
 
   if (!fs.existsSync(config.inputDir)) {
@@ -357,6 +360,7 @@ function scanInputDirectory(forceImmediate = false) {
 
 async function processNextInQueue() {
   if (isWorkerBusy) return;
+  if (!getLicenseStatus().licensed) return;
 
   const queuedJobs = state.jobs.filter((j) => j.status === 'queued');
   if (queuedJobs.length === 0) return;
@@ -587,6 +591,7 @@ const server = http.createServer(async (req, res) => {
       };
     });
     return sendJson(res, 200, {
+      license: getLicenseStatus(),
       config,
       isWorkerBusy,
       batchTelemetry: computeBatchTelemetry(),
@@ -594,6 +599,25 @@ const server = http.createServer(async (req, res) => {
       logs: activityLogs.slice(0, 80),
       serverTime: new Date().toISOString()
     });
+  }
+
+  // API: Activate hardware-locked machine license (by Admin Password or License Key)
+  if (req.method === 'POST' && pathname === '/api/activate-license') {
+    try {
+      const body = await parseJsonBody(req);
+      const status = activateCurrentMachine(body);
+      addLog(
+        `Machine Activated! Client: "${status.clientName}" | Machine ID: ${status.machineId} | Validity: ${status.expiresAt}`
+      );
+      setImmediate(() => {
+        scanInputDirectory(true);
+        processNextInQueue();
+      });
+      return sendJson(res, 200, { ok: true, license: status });
+    } catch (err) {
+      addLog(`License activation failed: ${err.message}`, 'warn');
+      return sendJson(res, 400, { ok: false, error: err.message });
+    }
   }
 
   // API: Download Master Batch Tracking CSV/Excel Report
@@ -987,15 +1011,19 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, () => {
+  const lic = getLicenseStatus();
   addLog(`================================================================`);
   addLog(`24/7 Book Scanner Production QC, OCR & Auto-Renamer Suite Ready`);
   addLog(`Dashboard & QC Studio : http://localhost:${PORT}`);
+  addLog(`Hardware Machine ID   : ${lic.machineId} (${lic.licensed ? 'LICENSED - ' + lic.clientName : 'LOCKED - ACTIVATION REQUIRED'})`);
   addLog(`Input Folder          : ${config.inputDir}`);
   addLog(`Output Folder         : ${config.outputDir}`);
   addLog(`================================================================`);
 
-  scanInputDirectory(true);
-  setImmediate(() => backfillExistingJobsQcData());
+  if (lic.licensed) {
+    scanInputDirectory(true);
+    setImmediate(() => backfillExistingJobsQcData());
+  }
 
   setInterval(() => {
     scanInputDirectory(false);

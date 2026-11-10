@@ -17,3 +17,7 @@ completedInputFiles/
 *.log
 .DS_Store
 Thumbs.db
+
+# Built client distribution packages
+Client_Distribution_Package/
+Client_Installer_Package.zip

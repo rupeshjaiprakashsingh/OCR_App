@@ -77,3 +77,14 @@ If the client laptop is a dedicated scanning station that should start the 24/7 
 | `R` / `L` | Rotate Selected Page `90° CW` / `90° CCW` |
 | `C` | Toggle Crop on Selected Page |
 | `Ctrl + Enter` | **Approve QC & Export Final Searchable PDF** |
+
+---
+
+## 🔒 Hardware-Locked Client Security & Licensing (Anti-Piracy)
+
+Each installation is cryptographically locked to the physical Windows laptop's hardware fingerprint (`MachineGuid` -> `RUP-XXXX-XXXX-XXXX`):
+- **Copy Protection**: If a customer copies the software folder to another PC, the software automatically locks itself on the new PC (`HARDWARE MISMATCH`).
+- **Method 1 — In-Person Admin Setup**: During installation on a client laptop, open `http://localhost:3456`, enter the **Master Admin Password** and select validity (`Lifetime`, `365 Days`, `90 Days`, or `30 Days Trial`) to unlock that laptop.
+- **Method 2 — Remote Activation Key (`Admin_KeyGenerator.bat`)**: Client sends their displayed `Machine ID` (`RUP-XXXX-XXXX-XXXX`). Run `Admin_KeyGenerator.bat` on your Admin PC to generate a hardware-locked `LIC-...` key for that specific laptop.
+- **Build Client-Safe Package (`Build_Client_Installer_Package.bat`)**: Creates `Client_Installer_Package.zip` with pre-compiled `bin/WinOcrEngine.exe` while stripping `.git`, `Admin_KeyGenerator.bat`, C# source code, and your local license key.
+
