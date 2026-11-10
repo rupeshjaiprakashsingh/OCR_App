@@ -1,9 +1,6 @@
 # Dependencies
 node_modules/
 
-# Compiled local binaries (automatically built on install via Install_Client_Machine.bat)
-bin/
-
 # Runtime state, thumbnails, and OCR cache
 data/
 

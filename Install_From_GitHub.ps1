@@ -11,15 +11,18 @@ Write-Host "====================================================================
 if (Test-Path $TempZip) { Remove-Item $TempZip -Force }
 if (Test-Path $TempExtract) { Remove-Item $TempExtract -Recurse -Force }
 
-Invoke-WebRequest -Uri $RepoZipUrl -OutFile $TempZip
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -Uri $RepoZipUrl -OutFile $TempZip -UseBasicParsing
 Expand-Archive -Path $TempZip -DestinationPath $TempExtract -Force
 
 $ExtractedRoot = Get-ChildItem -Path $TempExtract -Directory | Select-Object -First 1
 if (-not (Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Path $InstallDir | Out-Null
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
-Copy-Item -Path (Join-Path $ExtractedRoot.FullName "*") -Destination $InstallDir -Recurse -Force
+Get-ChildItem -Path $ExtractedRoot.FullName -Force | ForEach-Object {
+    Copy-Item -Path $_.FullName -Destination $InstallDir -Recurse -Force
+}
 
 # Remove Admin-only files on Client Laptop
 Remove-Item (Join-Path $InstallDir "Admin_KeyGenerator.bat") -Force -ErrorAction SilentlyContinue
