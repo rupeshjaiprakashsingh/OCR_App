@@ -21,6 +21,11 @@ if (-not (Test-Path $InstallDir)) {
 
 Copy-Item -Path (Join-Path $ExtractedRoot.FullName "*") -Destination $InstallDir -Recurse -Force
 
+# Remove Admin-only files on Client Laptop
+Remove-Item (Join-Path $InstallDir "Admin_KeyGenerator.bat") -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $InstallDir "Build_Client_Installer_Package.bat") -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $InstallDir "src\keygenCli.js") -Force -ErrorAction SilentlyContinue
+
 Remove-Item $TempZip -Force -ErrorAction SilentlyContinue
 Remove-Item $TempExtract -Recurse -Force -ErrorAction SilentlyContinue
 
