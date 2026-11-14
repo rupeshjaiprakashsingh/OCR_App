@@ -390,7 +390,12 @@ namespace OcrAppNative
                 );
 
                 // Multi-Signal Auto-Orientation & Exact Angle (90 / 270 / 180) Detector
-                if (!metrics.IsBlank && metrics.InkRatio > 0.004 && (isLandscapePage || hasVerticalLines || lowScoreForInk))
+                // For Page 1 (front cover, pageIndex == 0), only test rotation if 0-deg has < 2 natural words (cover art / barcodes can have vertical stripes)
+                bool shouldCheckRotation = (pageIndex == 0)
+                    ? (stats0.NaturalWords < 2 && isLandscapePage)
+                    : (!metrics.IsBlank && metrics.InkRatio > 0.004 && (isLandscapePage || hasVerticalLines || lowScoreForInk));
+
+                if (shouldCheckRotation)
                 {
                     BitmapRotation[] candidateRots = new BitmapRotation[] {
                         BitmapRotation.Clockwise90Degrees,
