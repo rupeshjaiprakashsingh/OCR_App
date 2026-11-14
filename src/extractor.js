@@ -66,7 +66,8 @@ const NON_TITLE_NOISE_PATTERNS = [
   /\bdistribution\b/i,
   /\bwolters\s+kluwer\b/i,
   /\bkluwer\b/i,
-  /^[0-9A-Z]{12,20}$/
+  /^[0-9A-Z]{12,20}$/,
+  /^[iIl1|!0oO\s-]{4,}$/
 ];
 
 const NON_AUTHOR_PATTERNS = [
