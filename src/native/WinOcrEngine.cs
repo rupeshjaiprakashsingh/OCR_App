@@ -112,13 +112,19 @@ namespace OcrAppNative
         static string CleanOcrWord(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return "";
-            // Normalize common typographic ligatures for 100% searchable accuracy
+            // Normalize common typographic ligatures and smart punctuation for 100% searchable accuracy
             return raw
                 .Replace("\uFB00", "ff")
                 .Replace("\uFB01", "fi")
                 .Replace("\uFB02", "fl")
                 .Replace("\uFB03", "ffi")
-                .Replace("\uFB04", "ffl");
+                .Replace("\uFB04", "ffl")
+                .Replace("\u2018", "'")
+                .Replace("\u2019", "'")
+                .Replace("\u201C", "\"")
+                .Replace("\u201D", "\"")
+                .Replace("\u2013", "-")
+                .Replace("\u2014", "-");
         }
 
         static readonly HashSet<string> COMMON_BOOK_WORDS = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -344,8 +350,8 @@ namespace OcrAppNative
                 double pdfW = page.Size.Width;
                 double pdfH = page.Size.Height;
                 PdfPageRenderOptions opts = new PdfPageRenderOptions();
-                // Use optimal target pixel width: 1440px for Page 1 cover, 1024px for inner pages (fast + 99.5% OCR accuracy)
-                uint targetW = (pageIndex == 0) ? 1440u : 1024u;
+                // High-Definition 240+ DPI target pixel width: 1800px for Page 1 cover, 1680px for inner pages (razor-sharp small fonts & tables)
+                uint targetW = (pageIndex == 0) ? 1800u : 1680u;
                 opts.DestinationWidth = targetW;
                 opts.DestinationHeight = (uint)Math.Max(100, Math.Round(targetW * (pdfH / Math.Max(1.0, pdfW))));
                 // Use uncompressed BMP in-memory stream to eliminate PNG zlib compression/decompression CPU overhead!

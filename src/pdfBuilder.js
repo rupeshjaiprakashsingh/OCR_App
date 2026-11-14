@@ -319,14 +319,14 @@ async function buildSearchablePdf({
         const words = Array.isArray(line.words) ? line.words : [];
         if (words.length === 0) continue;
 
+        // Pass 1: Transform all valid words on this line into upright image coordinates
+        // so we can synchronize the typographic baseline (Y) and font size across the entire line.
+        const transformedWords = [];
         for (let wIdx = 0; wIdx < words.length; wIdx++) {
           const wObj = words[wIdx];
           const cleanWord = sanitizeWinAnsi(wObj.t);
           if (!cleanWord) continue;
 
-          const textWithSpace = wIdx < words.length - 1 ? cleanWord + ' ' : cleanWord;
-
-          // Transform word box if operator manually changed rotation relative to detectedRotation
           let wx = wObj.x;
           let wy = wObj.y;
           let ww = wObj.w;
@@ -339,6 +339,8 @@ async function buildSearchablePdf({
           } else if (relRot === 180) {
             wx = baseImgW - (wObj.x + wObj.w);
             wy = baseImgH - (wObj.y + wObj.h);
+            ww = wObj.w;
+            wh = wObj.h;
           } else if (relRot === 270) {
             wx = wObj.y;
             wy = baseImgW - (wObj.x + wObj.w);
@@ -346,23 +348,64 @@ async function buildSearchablePdf({
             wh = wObj.w;
           }
 
-          // Convert to upright PDF space (rw x rh) then to final normalized [0, 0, stdW, stdH] space
-          const xrWord = wx * scaleX;
-          const yrWord = Math.max(0, rh - (wy + wh * 0.85) * scaleY);
-          const wrWord = Math.max(1, ww * scaleX);
-          const hrWord = Math.max(4, wh * scaleY);
+          const hasDescender = /[gjpqy(),;]/i.test(cleanWord);
+          const estBaselineY = wy + wh * (hasDescender ? 0.80 : 0.93);
+          transformedWords.push({ cleanWord, wx, wy, ww, wh, estBaselineY });
+        }
 
+        if (transformedWords.length === 0) continue;
+
+        // Determine whether this line is horizontal (standard reading line)
+        const minWx = Math.min(...transformedWords.map(w => w.wx));
+        const maxWx = Math.max(...transformedWords.map(w => w.wx + w.ww));
+        const minWy = Math.min(...transformedWords.map(w => w.wy));
+        const maxWy = Math.max(...transformedWords.map(w => w.wy + w.wh));
+        const isHorizontalLine =
+          transformedWords.length === 1 || (maxWx - minWx) >= (maxWy - minWy) * 0.75;
+
+        let sharedLineTargetY = null;
+        let sharedLineFontSize = null;
+
+        if (isHorizontalLine) {
+          // Sort left-to-right so Adobe Acrobat Ctrl+C / Ctrl+V copies words in 100% exact reading order
+          transformedWords.sort((a, b) => a.wx - b.wx);
+
+          const sortedBaselines = transformedWords.map(w => w.estBaselineY).sort((a, b) => a - b);
+          const medianBaselineImgY = sortedBaselines[Math.floor(sortedBaselines.length / 2)];
+          const yrLine = Math.max(0, rh - medianBaselineImgY * scaleY);
+          sharedLineTargetY = yrLine * s + (destY - s * cropY);
+
+          const sortedHeights = transformedWords.map(w => w.wh).sort((a, b) => a - b);
+          // Use 75th-percentile word height so cap/ascender height is uniform across x-height words ("an", "or")
+          const p75HeightImg = sortedHeights[Math.min(sortedHeights.length - 1, Math.floor(sortedHeights.length * 0.75))];
+          const hrLine = Math.max(4, p75HeightImg * scaleY);
+          const targetLineH = Math.max(4, hrLine * s);
+          sharedLineFontSize = Math.max(4, Math.min(120, targetLineH));
+        }
+
+        for (let wIdx = 0; wIdx < transformedWords.length; wIdx++) {
+          const tw = transformedWords[wIdx];
+          const textWithSpace = wIdx < transformedWords.length - 1 ? tw.cleanWord + ' ' : tw.cleanWord;
+
+          const xrWord = tw.wx * scaleX;
+          const wrWord = Math.max(1, tw.ww * scaleX);
           const targetX = xrWord * s + (destX - s * cropX);
-          const targetY = yrWord * s + (destY - s * cropY);
           const targetW = Math.max(1, wrWord * s);
-          const targetH = Math.max(4, hrWord * s);
 
-          const fontSize = Math.max(4, Math.min(120, targetH));
+          let targetY = sharedLineTargetY;
+          let fontSize = sharedLineFontSize;
+          if (targetY === null || fontSize === null) {
+            const yrWord = Math.max(0, rh - tw.estBaselineY * scaleY);
+            const hrWord = Math.max(4, tw.wh * scaleY);
+            targetY = yrWord * s + (destY - s * cropY);
+            fontSize = Math.max(4, Math.min(120, Math.max(4, hrWord * s)));
+          }
+
           let measuredW = 0;
           try {
-            measuredW = helveticaFont.widthOfTextAtSize(cleanWord, fontSize);
+            measuredW = helveticaFont.widthOfTextAtSize(tw.cleanWord, fontSize);
           } catch (_) {
-            measuredW = cleanWord.length * fontSize * 0.5;
+            measuredW = tw.cleanWord.length * fontSize * 0.5;
           }
 
           let horizScale = 100;
