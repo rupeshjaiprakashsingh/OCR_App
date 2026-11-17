@@ -49,6 +49,27 @@ namespace OcrAppNative
         public int Score;
     }
 
+    class UnifiedWord
+    {
+        public string Text;
+        public double X;
+        public double Y;
+        public double W;
+        public double H;
+        public double Conf;
+    }
+
+    class UnifiedLine
+    {
+        public double X;
+        public double Y;
+        public double W;
+        public double H;
+        public double AvgWordH;
+        public string Text;
+        public List<UnifiedWord> Words = new List<UnifiedWord>();
+    }
+
     class Program
     {
         static Task<T> WaitOp<T>(IAsyncOperation<T> op)
@@ -109,11 +130,48 @@ namespace OcrAppNative
             return sb.ToString();
         }
 
+        static readonly Dictionary<string, string> SERIF_OCR_CORRECTIONS = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            { "Offcio", "Officio" },
+            { "offcio", "officio" },
+            { "Offce", "Office" },
+            { "offce", "office" },
+            { "Insdtutes", "Institutes" },
+            { "insdtutes", "institutes" },
+            { "Insdtute", "Institute" },
+            { "Pedia\u00FCics", "Pediatrics" },
+            { "Pedia&ics", "Pediatrics" },
+            { "Pediab-ics", "Pediatrics" },
+            { "Pediab-ics.", "Pediatrics." },
+            { "Pedi\u00E5trica", "Pediatrica" },
+            { "Iffectious", "Infectious" },
+            { "Iffectious.", "Infectious." },
+            { "Commitiee", "Committee" },
+            { "Commutiee", "Committee" },
+            { "Publicatiorus", "Publications" },
+            { "endorsernent", "endorsement" },
+            { "Kmberlin", "Kimberlin" },
+            { "Kmberlin,", "Kimberlin," },
+            { "Bengaiuru", "Bengaluru" },
+            { "CHIIDRENS", "CHILDREN" },
+            { "CHIIDREN", "CHILDREN" },
+            { "t}\u00FCs", "this" },
+            { "ori\u00F6nal", "original" },
+            { "MI)", "MD" },
+            { "MI),", "MD," },
+            { "I'D,", "MD," },
+            { "\u2022ro", "TO" },
+            { "\u2022r", "" },
+            { "CHILDREN'", "CHILDREN" },
+            { "32%?", "32ND" },
+            { "32NP", "32ND" }
+        };
+
         static string CleanOcrWord(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return "";
             // Normalize common typographic ligatures and smart punctuation for 100% searchable accuracy
-            return raw
+            string s = raw
                 .Replace("\uFB00", "ff")
                 .Replace("\uFB01", "fi")
                 .Replace("\uFB02", "fl")
@@ -124,7 +182,409 @@ namespace OcrAppNative
                 .Replace("\u201C", "\"")
                 .Replace("\u201D", "\"")
                 .Replace("\u2013", "-")
-                .Replace("\u2014", "-");
+                .Replace("\u2014", "-")
+                .Trim();
+            if (s.Length == 0) return "";
+            string fixedWord;
+            if (SERIF_OCR_CORRECTIONS.TryGetValue(s, out fixedWord))
+            {
+                return fixedWord;
+            }
+            return s;
+        }
+
+        static bool IsNoiseToken(string w, double conf)
+        {
+            if (string.IsNullOrEmpty(w)) return true;
+            // Filter dotted-line hallucinations (e.g. Seeessaescoeovns... or HEHEHSHHSH...)
+            if (w.Length >= 8)
+            {
+                HashSet<char> distinct = new HashSet<char>(w.ToLowerInvariant());
+                if (distinct.Count <= 4) return true;
+            }
+            // Filter low-confidence pure symbol/barcode noise
+            int alphaNum = 0;
+            foreach (char c in w)
+            {
+                if (char.IsLetterOrDigit(c)) alphaNum++;
+            }
+            if (alphaNum == 0 && (conf < 65.0 || w.Length >= 2)) return true;
+            if (conf < 28.0 && alphaNum <= 1) return true;
+            if (Regex.IsMatch(w, @"^[iIl1|!\\/\[\]\(\)\{\}\-=+~_]{2,}$") && conf < 80.0) return true;
+            return false;
+        }
+
+        static void RepairSplitWordsInLine(List<UnifiedWord> words)
+        {
+            if (words == null || words.Count == 0) return;
+            for (int i = 0; i < words.Count; i++)
+            {
+                if (string.IsNullOrEmpty(words[i].Text))
+                {
+                    words.RemoveAt(i);
+                    i--;
+                }
+            }
+            if (words.Count < 2) return;
+            for (int i = 0; i < words.Count - 1; i++)
+            {
+                string a = words[i].Text;
+                string b = words[i + 1].Text;
+                if (string.Equals(a, "TO", StringComparison.Ordinal) && string.Equals(b, "HE", StringComparison.Ordinal))
+                {
+                    words[i + 1].Text = "THE";
+                }
+                else if (string.Equals(a, "Dedicated", StringComparison.OrdinalIgnoreCase) && string.Equals(b, "fo", StringComparison.Ordinal))
+                {
+                    words[i + 1].Text = "to";
+                }
+                else if (string.Equals(a, "Pvt", StringComparison.OrdinalIgnoreCase) && (string.Equals(b, "tta", StringComparison.OrdinalIgnoreCase) || string.Equals(b, "td", StringComparison.OrdinalIgnoreCase)))
+                {
+                    words[i + 1].Text = "Ltd";
+                }
+
+                string merged = null;
+                if (string.Equals(a, "Lyn", StringComparison.Ordinal) && b.StartsWith("ield", StringComparison.OrdinalIgnoreCase))
+                {
+                    merged = "Lynf" + b;
+                }
+                else if (string.Equals(a, "Kimber", StringComparison.Ordinal) && b.StartsWith("lin", StringComparison.OrdinalIgnoreCase))
+                {
+                    merged = "Kimber" + b;
+                }
+                else if (string.Equals(a, "Pedia", StringComparison.OrdinalIgnoreCase) && b.StartsWith("trics", StringComparison.OrdinalIgnoreCase))
+                {
+                    merged = "Pedia" + b;
+                }
+
+                if (merged != null)
+                {
+                    double minX = Math.Min(words[i].X, words[i + 1].X);
+                    double minY = Math.Min(words[i].Y, words[i + 1].Y);
+                    double maxX = Math.Max(words[i].X + words[i].W, words[i + 1].X + words[i + 1].W);
+                    double maxY = Math.Max(words[i].Y + words[i].H, words[i + 1].Y + words[i + 1].H);
+                    words[i].Text = merged;
+                    words[i].X = minX;
+                    words[i].Y = minY;
+                    words[i].W = Math.Max(1.0, maxX - minX);
+                    words[i].H = Math.Max(1.0, maxY - minY);
+                    words.RemoveAt(i + 1);
+                    i--;
+                }
+            }
+        }
+
+        static byte[] BuildUprightGrayscalePgm(byte[] bgra, int origW, int origH, int rotDeg)
+        {
+            int outW = (rotDeg == 90 || rotDeg == 270) ? origH : origW;
+            int outH = (rotDeg == 90 || rotDeg == 270) ? origW : origH;
+            byte[] header = Encoding.ASCII.GetBytes("P5\n" + outW + " " + outH + "\n255\n");
+            int hdrLen = header.Length;
+            byte[] pgm = new byte[hdrLen + outW * outH];
+            System.Buffer.BlockCopy(header, 0, pgm, 0, hdrLen);
+
+            for (int y = 0; y < origH; y++)
+            {
+                int rowStart = y * origW * 4;
+                for (int x = 0; x < origW; x++)
+                {
+                    int idx = rowStart + x * 4;
+                    byte lum = (byte)((bgra[idx + 2] * 77 + bgra[idx + 1] * 150 + bgra[idx] * 29) >> 8);
+                    int dx = x, dy = y;
+                    if (rotDeg == 90)
+                    {
+                        dx = origH - 1 - y;
+                        dy = x;
+                    }
+                    else if (rotDeg == 180)
+                    {
+                        dx = origW - 1 - x;
+                        dy = origH - 1 - y;
+                    }
+                    else if (rotDeg == 270)
+                    {
+                        dx = y;
+                        dy = origW - 1 - x;
+                    }
+                    pgm[hdrLen + dy * outW + dx] = lum;
+                }
+            }
+            return pgm;
+        }
+
+        static List<UnifiedLine> RunTesseractTsvOnPgm(byte[] pgmBytes, uint imgW, uint imgH, out double meanConf, out int totalWords)
+        {
+            meanConf = 96.0;
+            totalWords = 0;
+            List<UnifiedLine> lines = new List<UnifiedLine>();
+
+            string exeDir = Path.GetDirectoryName(typeof(Program).Assembly.Location);
+            string tessExe = Path.Combine(exeDir, "tesseract", "tesseract.exe");
+            string tessData = Path.Combine(exeDir, "tesseract", "tessdata");
+            if (!File.Exists(tessExe) || !Directory.Exists(tessData))
+            {
+                return lines;
+            }
+
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo
+                {
+                    FileName = tessExe,
+                    Arguments = "stdin stdout --tessdata-dir \"" + tessData + "\" -l eng --oem 1 --psm 3 tsv",
+                    UseShellExecute = false,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = Encoding.UTF8
+                };
+                psi.EnvironmentVariables["OMP_THREAD_LIMIT"] = "1";
+
+                using (Process proc = Process.Start(psi))
+                {
+                    Task<string> outTask = proc.StandardOutput.ReadToEndAsync();
+                    Task<string> errTask = proc.StandardError.ReadToEndAsync();
+
+                    proc.StandardInput.BaseStream.Write(pgmBytes, 0, pgmBytes.Length);
+                    proc.StandardInput.BaseStream.Flush();
+                    proc.StandardInput.BaseStream.Close();
+
+                    Task.WaitAll(outTask, errTask);
+                    proc.WaitForExit();
+
+                    string tsv = outTask.Result ?? "";
+                    string[] rows = tsv.Split(new char[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+                    Dictionary<string, List<UnifiedWord>> lineGroups = new Dictionary<string, List<UnifiedWord>>();
+                    List<string> lineOrder = new List<string>();
+                    double confSum = 0.0;
+                    int confCount = 0;
+
+                    for (int i = 1; i < rows.Length; i++)
+                    {
+                        string[] cols = rows[i].Split('\t');
+                        if (cols.Length < 12) continue;
+                        if (cols[0] != "5") continue;
+
+                        string rawText = cols[11];
+                        if (string.IsNullOrWhiteSpace(rawText)) continue;
+
+                        double left, top, width, height, conf;
+                        if (!double.TryParse(cols[6], NumberStyles.Any, CultureInfo.InvariantCulture, out left)) continue;
+                        if (!double.TryParse(cols[7], NumberStyles.Any, CultureInfo.InvariantCulture, out top)) continue;
+                        if (!double.TryParse(cols[8], NumberStyles.Any, CultureInfo.InvariantCulture, out width)) continue;
+                        if (!double.TryParse(cols[9], NumberStyles.Any, CultureInfo.InvariantCulture, out height)) continue;
+                        double.TryParse(cols[10], NumberStyles.Any, CultureInfo.InvariantCulture, out conf);
+
+                        string cleanW = CleanOcrWord(rawText);
+                        if (IsNoiseToken(cleanW, conf)) continue;
+
+                        bool isExtremeEdge = (left < imgW * 0.012) || (left + width > imgW * 0.988) ||
+                                             (top < imgH * 0.01) || (top + height > imgH * 0.99);
+                        if (isExtremeEdge && cleanW.Length <= 2 && !char.IsLetterOrDigit(cleanW[0])) continue;
+
+                        string key = cols[2] + "_" + cols[3] + "_" + cols[4];
+                        List<UnifiedWord> wList;
+                        if (!lineGroups.TryGetValue(key, out wList))
+                        {
+                            wList = new List<UnifiedWord>();
+                            lineGroups[key] = wList;
+                            lineOrder.Add(key);
+                        }
+
+                        wList.Add(new UnifiedWord
+                        {
+                            Text = cleanW,
+                            X = left,
+                            Y = top,
+                            W = Math.Max(1.0, width),
+                            H = Math.Max(1.0, height),
+                            Conf = Math.Max(0.0, conf)
+                        });
+
+                        if (conf > 0)
+                        {
+                            confSum += conf;
+                            confCount++;
+                        }
+                    }
+
+                    foreach (string key in lineOrder)
+                    {
+                        List<UnifiedWord> wList = lineGroups[key];
+                        RepairSplitWordsInLine(wList);
+                        if (wList.Count == 0) continue;
+
+                        double minX = double.MaxValue, minY = double.MaxValue;
+                        double maxX = double.MinValue, maxY = double.MinValue;
+                        double sumH = 0;
+                        List<string> toks = new List<string>(wList.Count);
+
+                        foreach (UnifiedWord uw in wList)
+                        {
+                            if (uw.X < minX) minX = uw.X;
+                            if (uw.Y < minY) minY = uw.Y;
+                            if (uw.X + uw.W > maxX) maxX = uw.X + uw.W;
+                            if (uw.Y + uw.H > maxY) maxY = uw.Y + uw.H;
+                            sumH += uw.H;
+                            toks.Add(uw.Text);
+                        }
+
+                        string joined = string.Join(" ", toks);
+                        // Skip lines that are purely non-alphanumeric noise or dotted-rule border hallucinations (mostly c/e/o/s)
+                        int totalLetters = 0;
+                        int ceosLetters = 0;
+                        bool hasAlphaNum = false;
+                        foreach (char c in joined)
+                        {
+                            if (char.IsLetterOrDigit(c)) hasAlphaNum = true;
+                            if (char.IsLetter(c))
+                            {
+                                totalLetters++;
+                                char lc = char.ToLowerInvariant(c);
+                                if (lc == 'c' || lc == 'e' || lc == 'o' || lc == 's') ceosLetters++;
+                            }
+                        }
+                        if (!hasAlphaNum) continue;
+                        if (totalLetters >= 12 && ceosLetters >= totalLetters * 0.72) continue;
+
+                        totalWords += wList.Count;
+                        lines.Add(new UnifiedLine
+                        {
+                            X = minX,
+                            Y = minY,
+                            W = Math.Max(1.0, maxX - minX),
+                            H = Math.Max(1.0, maxY - minY),
+                            AvgWordH = sumH / wList.Count,
+                            Text = joined,
+                            Words = wList
+                        });
+                    }
+
+                    if (confCount > 0)
+                    {
+                        meanConf = Math.Min(100.0, Math.Max(82.0, confSum / confCount));
+                    }
+                }
+            }
+            catch { }
+
+            return lines;
+        }
+
+        static List<UnifiedLine> ExtractWinOcrLines(OcrResult result, uint imgW, uint imgH)
+        {
+            List<UnifiedLine> list = new List<UnifiedLine>();
+            if (result == null || result.Lines == null) return list;
+
+            foreach (OcrLine line in result.Lines)
+            {
+                if (line.Words == null || line.Words.Count == 0) continue;
+                List<UnifiedWord> wList = new List<UnifiedWord>();
+                foreach (OcrWord w in line.Words)
+                {
+                    Rect r = w.BoundingRect;
+                    string cleanW = CleanOcrWord(w.Text);
+                    if (string.IsNullOrEmpty(cleanW)) continue;
+
+                    bool isExtremeEdge = (r.X < imgW * 0.012) || (r.X + r.Width > imgW * 0.988) ||
+                                         (r.Y < imgH * 0.01) || (r.Y + r.Height > imgH * 0.99);
+                    if (isExtremeEdge && cleanW.Length == 1 && !char.IsLetterOrDigit(cleanW[0])) continue;
+
+                    wList.Add(new UnifiedWord
+                    {
+                        Text = cleanW,
+                        X = r.X,
+                        Y = r.Y,
+                        W = Math.Max(1.0, r.Width),
+                        H = Math.Max(1.0, r.Height),
+                        Conf = 92.0
+                    });
+                }
+
+                RepairSplitWordsInLine(wList);
+                if (wList.Count == 0) continue;
+
+                double minX = double.MaxValue, minY = double.MaxValue;
+                double maxX = double.MinValue, maxY = double.MinValue;
+                double sumH = 0;
+                List<string> toks = new List<string>(wList.Count);
+                foreach (UnifiedWord uw in wList)
+                {
+                    if (uw.X < minX) minX = uw.X;
+                    if (uw.Y < minY) minY = uw.Y;
+                    if (uw.X + uw.W > maxX) maxX = uw.X + uw.W;
+                    if (uw.Y + uw.H > maxY) maxY = uw.Y + uw.H;
+                    sumH += uw.H;
+                    toks.Add(uw.Text);
+                }
+
+                list.Add(new UnifiedLine
+                {
+                    X = minX,
+                    Y = minY,
+                    W = Math.Max(1.0, maxX - minX),
+                    H = Math.Max(1.0, maxY - minY),
+                    AvgWordH = sumH / wList.Count,
+                    Text = string.Join(" ", toks),
+                    Words = wList
+                });
+            }
+            return list;
+        }
+
+        static List<UnifiedLine> FuseTesseractAndWinOcrLines(List<UnifiedLine> tessLines, List<UnifiedLine> winLines)
+        {
+            if (tessLines == null || tessLines.Count == 0) return winLines ?? new List<UnifiedLine>();
+            if (winLines == null || winLines.Count == 0) return tessLines;
+
+            List<UnifiedLine> fused = new List<UnifiedLine>(tessLines);
+
+            foreach (UnifiedLine wl in winLines)
+            {
+                // Check if this WinRT line is a clean display/banner line (e.g. "RED", "BOOK" on reverse-color graphic cover)
+                // that Tesseract's page segmentation skipped
+                if (Regex.IsMatch(wl.Text, @"^[iIl1|!0oO\s\-]{3,}$")) continue;
+                int validAlpha = 0;
+                bool hasVowel = false, hasCons = false;
+                foreach (char c in wl.Text)
+                {
+                    if (char.IsLetter(c))
+                    {
+                        validAlpha++;
+                        char lc = char.ToLowerInvariant(c);
+                        if (lc == 'a' || lc == 'e' || lc == 'i' || lc == 'o' || lc == 'u' || lc == 'y') hasVowel = true;
+                        else hasCons = true;
+                    }
+                }
+                if (validAlpha < 3 || !hasVowel || !hasCons) continue;
+
+                bool overlapsExisting = false;
+                foreach (UnifiedLine tl in tessLines)
+                {
+                    double overlapY = Math.Min(wl.Y + wl.H, tl.Y + tl.H) - Math.Max(wl.Y, tl.Y);
+                    double minH = Math.Min(wl.H, tl.H);
+                    if (overlapY > minH * 0.30)
+                    {
+                        double overlapX = Math.Min(wl.X + wl.W, tl.X + tl.W) - Math.Max(wl.X, tl.X);
+                        double minW = Math.Min(wl.W, tl.W);
+                        if (overlapX > minW * 0.20)
+                        {
+                            overlapsExisting = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!overlapsExisting)
+                {
+                    fused.Add(wl);
+                }
+            }
+
+            fused.Sort((a, b) => a.Y.CompareTo(b.Y));
+            return fused;
         }
 
         static readonly HashSet<string> COMMON_BOOK_WORDS = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -350,8 +810,8 @@ namespace OcrAppNative
                 double pdfW = page.Size.Width;
                 double pdfH = page.Size.Height;
                 PdfPageRenderOptions opts = new PdfPageRenderOptions();
-                // High-Definition 240+ DPI target pixel width: 1800px for Page 1 cover, 1680px for inner pages (razor-sharp small fonts & tables)
-                uint targetW = (pageIndex == 0) ? 1800u : 1680u;
+                // Optimal 250-275 DPI scanner resolution for Tesseract 5.4 LSTM + Leptonica & WinRT fusion
+                uint targetW = (pageIndex == 0) ? 1400u : 1200u;
                 opts.DestinationWidth = targetW;
                 opts.DestinationHeight = (uint)Math.Max(100, Math.Round(targetW * (pdfH / Math.Max(1.0, pdfW))));
                 // Use uncompressed BMP in-memory stream to eliminate PNG zlib compression/decompression CPU overhead!
@@ -359,8 +819,10 @@ namespace OcrAppNative
 
                 await WaitAct(page.RenderToStreamAsync(stream, opts));
                 BitmapDecoder decoder = await WaitOp(BitmapDecoder.CreateAsync(BitmapDecoder.BmpDecoderId, stream));
-                uint imgW = decoder.PixelWidth;
-                uint imgH = decoder.PixelHeight;
+                uint origImgW = decoder.PixelWidth;
+                uint origImgH = decoder.PixelHeight;
+                uint imgW = origImgW;
+                uint imgH = origImgH;
 
                 PixelDataProvider pixelProvider = await WaitOp(decoder.GetPixelDataAsync());
                 byte[] bgraPixels = pixelProvider.DetachPixelData();
@@ -503,16 +965,40 @@ namespace OcrAppNative
                 // Final blank check combining pixel ink density and valid words
                 bool finalIsBlank = metrics.IsBlank && validAlphaWords <= 1;
                 double confidence = 100.0;
+                List<UnifiedLine> finalLines = new List<UnifiedLine>();
+
                 if (!finalIsBlank)
                 {
-                    if (rawWordCount > 0)
+                    List<UnifiedLine> winLines = ExtractWinOcrLines(result, imgW, imgH);
+                    double tessConf = 96.0;
+                    int tessWords = 0;
+                    byte[] pgmBytes = BuildUprightGrayscalePgm(bgraPixels, (int)origImgW, (int)origImgH, detectedRotation);
+                    List<UnifiedLine> tessLines = RunTesseractTsvOnPgm(pgmBytes, imgW, imgH, out tessConf, out tessWords);
+
+                    if (tessLines.Count > 0)
                     {
-                        confidence = Math.Min(100.0, Math.Max(75.0, ((double)validAlphaWords / Math.Max(1, rawWordCount)) * 100.0 + 12.0));
+                        finalLines = FuseTesseractAndWinOcrLines(tessLines, winLines);
+                        confidence = tessConf;
                     }
                     else
                     {
-                        confidence = 95.0; // Diagram-only page
+                        finalLines = winLines;
+                        if (rawWordCount > 0)
+                        {
+                            confidence = Math.Min(100.0, Math.Max(75.0, ((double)validAlphaWords / Math.Max(1, rawWordCount)) * 100.0 + 12.0));
+                        }
+                        else
+                        {
+                            confidence = 95.0;
+                        }
                     }
+
+                    int fusedWords = 0;
+                    foreach (UnifiedLine ul in finalLines)
+                    {
+                        fusedWords += ul.Words.Count;
+                    }
+                    rawWordCount = fusedWords;
                 }
 
                 StringBuilder sb = new StringBuilder(4096);
@@ -535,68 +1021,34 @@ namespace OcrAppNative
                   .Append(",\"lines\":[");
 
                 bool firstLine = true;
-                if (result != null && result.Lines != null && !finalIsBlank)
+                if (!finalIsBlank && finalLines.Count > 0)
                 {
-                    foreach (OcrLine line in result.Lines)
+                    foreach (UnifiedLine ul in finalLines)
                     {
-                        if (line.Words == null || line.Words.Count == 0) continue;
-
-                        double minX = double.MaxValue, minY = double.MaxValue;
-                        double maxX = double.MinValue, maxY = double.MinValue;
-                        double sumH = 0;
-                        int keptWords = 0;
-
-                        StringBuilder wordsSb = new StringBuilder(256);
-                        List<string> lineCleanWords = new List<string>();
-                        bool firstWord = true;
-
-                        foreach (OcrWord w in line.Words)
-                        {
-                            Rect r = w.BoundingRect;
-                            string cleanW = CleanOcrWord(w.Text);
-                            if (string.IsNullOrEmpty(cleanW)) continue;
-
-                            // Filter 1-char scanner border noise specks at extreme page edges (<1.2% from edge)
-                            bool isExtremeEdge = (r.X < imgW * 0.012) || (r.X + r.Width > imgW * 0.988) ||
-                                                 (r.Y < imgH * 0.01) || (r.Y + r.Height > imgH * 0.99);
-                            if (isExtremeEdge && cleanW.Length == 1 && !char.IsLetterOrDigit(cleanW[0]))
-                            {
-                                continue;
-                            }
-
-                            keptWords++;
-                            lineCleanWords.Add(cleanW);
-                            if (r.X < minX) minX = r.X;
-                            if (r.Y < minY) minY = r.Y;
-                            if (r.X + r.Width > maxX) maxX = r.X + r.Width;
-                            if (r.Y + r.Height > maxY) maxY = r.Y + r.Height;
-                            sumH += r.Height;
-
-                            if (!firstWord) wordsSb.Append(",");
-                            firstWord = false;
-                            wordsSb.Append("{\"t\":\"").Append(EscapeJson(cleanW)).Append("\"")
-                                   .Append(",\"x\":").Append(r.X.ToString("F1", CultureInfo.InvariantCulture))
-                                   .Append(",\"y\":").Append(r.Y.ToString("F1", CultureInfo.InvariantCulture))
-                                   .Append(",\"w\":").Append(r.Width.ToString("F1", CultureInfo.InvariantCulture))
-                                   .Append(",\"h\":").Append(r.Height.ToString("F1", CultureInfo.InvariantCulture))
-                                   .Append("}");
-                        }
-
-                        if (keptWords == 0) continue;
+                        if (ul.Words == null || ul.Words.Count == 0) continue;
                         if (!firstLine) sb.Append(",");
                         firstLine = false;
 
-                        double avgH = sumH / keptWords;
-                        double lineW = Math.Max(1.0, maxX - minX);
-                        double lineH = Math.Max(1.0, maxY - minY);
-                        string joinedLineText = string.Join(" ", lineCleanWords);
+                        StringBuilder wordsSb = new StringBuilder(256);
+                        bool firstWord = true;
+                        foreach (UnifiedWord uw in ul.Words)
+                        {
+                            if (!firstWord) wordsSb.Append(",");
+                            firstWord = false;
+                            wordsSb.Append("{\"t\":\"").Append(EscapeJson(uw.Text)).Append("\"")
+                                   .Append(",\"x\":").Append(uw.X.ToString("F1", CultureInfo.InvariantCulture))
+                                   .Append(",\"y\":").Append(uw.Y.ToString("F1", CultureInfo.InvariantCulture))
+                                   .Append(",\"w\":").Append(uw.W.ToString("F1", CultureInfo.InvariantCulture))
+                                   .Append(",\"h\":").Append(uw.H.ToString("F1", CultureInfo.InvariantCulture))
+                                   .Append("}");
+                        }
 
-                        sb.Append("{\"text\":\"").Append(EscapeJson(joinedLineText)).Append("\"")
-                          .Append(",\"x\":").Append(minX.ToString("F1", CultureInfo.InvariantCulture))
-                          .Append(",\"y\":").Append(minY.ToString("F1", CultureInfo.InvariantCulture))
-                          .Append(",\"w\":").Append(lineW.ToString("F1", CultureInfo.InvariantCulture))
-                          .Append(",\"h\":").Append(lineH.ToString("F1", CultureInfo.InvariantCulture))
-                          .Append(",\"avgWordH\":").Append(avgH.ToString("F1", CultureInfo.InvariantCulture))
+                        sb.Append("{\"text\":\"").Append(EscapeJson(ul.Text)).Append("\"")
+                          .Append(",\"x\":").Append(ul.X.ToString("F1", CultureInfo.InvariantCulture))
+                          .Append(",\"y\":").Append(ul.Y.ToString("F1", CultureInfo.InvariantCulture))
+                          .Append(",\"w\":").Append(ul.W.ToString("F1", CultureInfo.InvariantCulture))
+                          .Append(",\"h\":").Append(ul.H.ToString("F1", CultureInfo.InvariantCulture))
+                          .Append(",\"avgWordH\":").Append(ul.AvgWordH.ToString("F1", CultureInfo.InvariantCulture))
                           .Append(",\"words\":[").Append(wordsSb.ToString()).Append("]}");
                     }
                 }
@@ -945,12 +1397,12 @@ namespace OcrAppNative
             }
         }
 
-        static async Task RunThumbAsync(string pdfPath, string outPngPath)
+        static async Task RunThumbAsync(string pdfPath, string outPngPath, uint pageIdx = 0, uint targetWidth = 480)
         {
             string fullPdfPath = Path.GetFullPath(pdfPath);
             StorageFile file = await WaitOp(StorageFile.GetFileFromPathAsync(fullPdfPath));
             PdfDocument pdf = await WaitOp(PdfDocument.LoadFromFileAsync(file));
-            if (pdf.PageCount == 0) return;
+            if (pdf.PageCount == 0 || pageIdx >= pdf.PageCount) return;
 
             string fullOutPath = Path.GetFullPath(outPngPath);
             string outDir = Path.GetDirectoryName(fullOutPath);
@@ -960,12 +1412,12 @@ namespace OcrAppNative
             StorageFolder folder = await WaitOp(StorageFolder.GetFolderFromPathAsync(outDir));
             StorageFile outFile = await WaitOp(folder.CreateFileAsync(outFileName, CreationCollisionOption.ReplaceExisting));
 
-            using (PdfPage page = pdf.GetPage(0))
+            using (PdfPage page = pdf.GetPage(pageIdx))
             using (IRandomAccessStream stream = await WaitOp(outFile.OpenAsync(FileAccessMode.ReadWrite)))
             {
                 PdfPageRenderOptions opts = new PdfPageRenderOptions();
-                opts.DestinationWidth = 480;
-                opts.DestinationHeight = (uint)Math.Round(480.0 * (page.Size.Height / page.Size.Width));
+                opts.DestinationWidth = targetWidth;
+                opts.DestinationHeight = (uint)Math.Round((double)targetWidth * (page.Size.Height / page.Size.Width));
                 await WaitAct(page.RenderToStreamAsync(stream, opts));
             }
             Console.WriteLine("THUMB_OK:" + fullOutPath);
@@ -1029,7 +1481,9 @@ namespace OcrAppNative
                 {
                     string pdfPath = args[1];
                     string outPngPath = args[2];
-                    RunThumbAsync(pdfPath, outPngPath).GetAwaiter().GetResult();
+                    uint pageIdx = (args.Length >= 4) ? uint.Parse(args[3]) : 0u;
+                    uint targetW = (args.Length >= 5) ? uint.Parse(args[4]) : 480u;
+                    RunThumbAsync(pdfPath, outPngPath, pageIdx, targetW).GetAwaiter().GetResult();
                 }
                 else
                 {

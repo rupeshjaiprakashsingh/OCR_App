@@ -1,17 +1,40 @@
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const { execFileSync } = require('child_process');
 
 const ROOT_DIR = path.join(__dirname, '..');
 const BIN_DIR = path.join(ROOT_DIR, 'bin');
 const EXE_PATH = path.join(BIN_DIR, 'WinOcrEngine.exe');
 const CS_SOURCE_PATH = path.join(__dirname, 'native', 'WinOcrEngine.cs');
+const TESS_DIR = path.join(BIN_DIR, 'tesseract');
+const TESS_DLL_PATH = path.join(TESS_DIR, 'libtesseract-5.dll');
+const TESS_DLL_GZ_PATH = path.join(TESS_DIR, 'libtesseract-5.dll.gz');
+
+/**
+ * Ensures the native 64-bit C++ Tesseract 5.4 LSTM + Leptonica AVX2 engine DLL is unpacked.
+ */
+function ensureTesseractBinary() {
+  try {
+    if (!fs.existsSync(TESS_DLL_PATH) && fs.existsSync(TESS_DLL_GZ_PATH)) {
+      console.log('[Setup] Unpacking native C++ Tesseract 5.4 LSTM + Leptonica AVX2 engine (libtesseract-5.dll)...');
+      const gzData = fs.readFileSync(TESS_DLL_GZ_PATH);
+      const rawDll = zlib.gunzipSync(gzData);
+      fs.writeFileSync(TESS_DLL_PATH, rawDll);
+      console.log('[Setup] Native Tesseract 5.4 LSTM engine ready.');
+    }
+  } catch (err) {
+    console.warn('[Setup] Warning unpacking libtesseract-5.dll.gz:', err.message);
+  }
+}
 
 /**
  * Ensures bin/WinOcrEngine.exe is compiled and ready on any Windows 10/11 laptop.
  * Automatically compiles from src/native/WinOcrEngine.cs using built-in Windows .NET csc.exe if missing.
  */
 function ensureWinOcrBinary() {
+  ensureTesseractBinary();
+
   if (fs.existsSync(EXE_PATH)) {
     return EXE_PATH;
   }

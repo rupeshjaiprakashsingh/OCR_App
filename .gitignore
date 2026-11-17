@@ -18,3 +18,6 @@ Thumbs.db
 # Built client distribution packages
 Client_Distribution_Package/
 Client_Installer_Package.zip
+
+# Unpacked 96MB Tesseract DLL (tracked as 28MB libtesseract-5.dll.gz and auto-unpacked on startup)
+bin/tesseract/libtesseract-5.dll
